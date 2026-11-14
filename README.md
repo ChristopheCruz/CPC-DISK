@@ -76,6 +76,23 @@ pip install -e .
 
 Sans installation : `python -m cpc_dsk.cli …` et `python -m cpc_dsk.gui`.
 
+## Utilisation (GUI)
+
+```bash
+python -m cpc_dsk.gui
+```
+
+Deux onglets :
+
+- **Disquette (.dsk)** : ouvrir / créer / sauvegarder, liste des fichiers
+  avec leur couche (`FILER` / `AMSDOS`), ajout d'un fichier local (nom 8.3,
+  type, adresse de chargement, couche `both`/`filer`/`amsdos`), extraction,
+  suppression, hexdumper de fichier ou de secteur brut.
+- **Gotek (clé USB)** : pile de sources `.dsk`/`.adf`, options de nommage
+  (`DISK%03d.adf`, sous-dossier, index de départ), génération du répertoire à
+  copier sur la clé, vérification des images, et création d'une image FAT
+  complète quand `mformat`/`mkfs.fat` est disponible.
+
 ## Utilisation (CLI)
 
 ```bash
