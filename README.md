@@ -1,19 +1,26 @@
-# Amstrad CPC — Éditeur de disquettes .dsk & images Gotek
+# Amstrad CPC — Éditeur de disquettes `.dsk` & images Gotek
 
 Outil **Python** pour créer et éditer :
 
-- des **disquettes virtuelles `.dsk`** au format **ADF** (format CPC standard, utilisé par les émulateurs Fuse/CPCJS),
-- des **images de clé USB** pour **Gotek** (lecteur floppy USB) sur Amstrad CPC 6128.
+- des **disquettes virtuelles `.dsk`** au format **EXTENDED CPC DSK** (format
+  standard des images CPC, lu par les émulateurs Fuse / CPCJS / CERMU et le
+  Gotek),
+- des **images de clé USB** pour **Gotek** (lecteur floppy USB) sur Amstrad
+  CPC 6128.
+
+Le format est **vérifié sur des disquettes réelles** (jeux CPC téléchargés sur
+l'Internet Archive).
 
 ## Structure du projet
 
 ```
 AmstradCPC/
 ├── cpc_dsk/
-│   ├── core/          # Noyau sans dépendance GUI : format ADF, géométrie disquette, Gotek
-│   │   ├── adf.py     #   Lecture/écriture du format binaire ADF
-│   │   ├── geometry.py#   Constantes CPC (pistes, faces, secteurs, taille)
-│   │   └── gotek.py   #   Génération d'image USB pour Gotek
+│   ├── core/          # Noyau sans dépendance GUI
+│   │   ├── adf.py     #   Conteneur EXTENDED CPC DSK (Disk-Info + blocs piste)
+│   │   ├── cpcfs.py   #   Système de fichiers : fichiers AMSDOS (lister/lire/écrire)
+│   │   ├── geometry.py#   Géométrie par défaut (création de disquette vierge)
+│   │   └── gotek.py   #   Préparation de l'image USB pour Gotek
 │   ├── cli.py         # Interface en ligne de commande
 │   └── gui.py         # Interface graphique (tkinter)
 ├── tests/
@@ -21,14 +28,20 @@ AmstradCPC/
 └── README.md
 ```
 
-## Architecture
+## Format géré
 
-Un **noyau commun** (`cpc_dsk.core`) implémente toute la logique (lecture/écriture ADF,
-système de fichiers CPC, image Gotek). La **CLI** et la **GUI** sont de fins
-« adapteurs » qui s'appuient sur ce noyau :
+**Conteneur « EXTENDED CPC DSK »** (vérifié) :
 
-- `cpc-dsk` (CLI) — scriptable, idéal pour automatiser la création de disquettes/clé USB.
-- GUI (tkinter) — explorateur visuel de la disquette, édition des fichiers.
+- **Disk-Info** (256 o) : magic `EXTENDED CPC DSK File…`, nb de pistes `0x30`,
+  nb de faces `0x31`, tableau des tailles de pistes `0x34` (1 o/piste × 256).
+- **Blocs piste** : en-tête `Track-Info` (256 o, nb de secteurs `0x15`) +
+  données de secteurs contiguës.
+- Géométrie type : 40 pistes × 1 face, bloc de 4864 o (9 secteurs × **512 o**)
+  → fichier de 194 816 o, identique à une disquette CPC réelle.
+
+**Système de fichiers** : chaque fichier commence par un **en-tête AMSDOS**
+(128 o : nom, type, adresses, longueur, checksum) suivi des données. Les
+fichiers sont localisés par balayage des en-têtes AMSDOS à checksum valide.
 
 ## Installation
 
@@ -36,54 +49,45 @@ système de fichiers CPC, image Gotek). La **CLI** et la **GUI** sont de fins
 pip install -e .
 ```
 
+Sans installation : `python -m cpc_dsk.cli …` et `python -m cpc_dsk.gui`.
+
 ## Utilisation (CLI)
 
 ```bash
-# Créer une disquette ADF vierge (double face, 40 pistes, 200 Ko)
-cpc-dsk new disc1.dsk
+# Créer une disquette vierge
+cpc-dsk new monjeu.dsk
 
-# Afficher la géométrie / les informations d'une disquette
-cpc-dsk info disc1.dsk
+# Géométrie + liste des fichiers
+cpc-dsk info monjeu.dsk
+cpc-dsk list monjeu.dsk
 
-# Hexdump d'un secteur brut (piste, face, secteur)
-cpc-dsk hex disc1.dsk 0 0 0
+# Extraire un fichier de la disquette vers un fichier local
+cpc-dsk read monjeu.dsk "MONPROG BAS" --out monprog.bas
 
-# Écrire le contenu d'un fichier local (256 o) dans un secteur brut
-cpc-dsk sector disc1.dsk 0 0 0 --write-file fichier_local
+# Copier un fichier local sur la disquette
+cpc-dsk write monjeu.dsk "MONPROG BAS" monprog.bas --type basic --load 0x4000
 
-# Exporter un secteur brut vers un fichier
-cpc-dsk dump disc1.dsk 0 0 0 --out secteur.bin
+# Accès bas niveau (secteurs bruts)
+cpc-dsk hex monjeu.dsk 0 0
+cpc-dsk sector monjeu.dsk 0 0 --write-file brut.bin
 ```
 
-Sans installation, on peut aussi lancer directement :
+## Validation du format
 
-```bash
-python -m cpc_dsk.cli new disc1.dsk
-python -m cpc_dsk.gui          # interface graphique (tkinter)
-```
+- Le conteneur et les fichiers AMSDOS sont **testés** (`pytest`, 14 tests) et
+  **vérifiés sur une disquette réelle** (`greed.dsk` — *Yogi Bear* : 4 fichiers
+  extraits, dont le programme BASIC `YOGI BAS`).
+- Un aller-retour **écriture → relecture** est vérifié sur disquette vierge.
 
-## État actuel & roadmap
+## Limites connues
 
-**Implémenté et testé** (suites `pytest` : 9/9) :
-- Noyau ADF : géométrie standard CPC (40 pistes × 2 faces × 10 secteurs ×
-  256 o = 200 Ko), lecture/écriture de secteurs bruts, aller-retour fichier.
-- CLI : `new`, `info`, `sector`, `hex`, `dump`.
-- GUI (tkinter) : ouverture, géométrie, arborescence pistes/faces/secteurs,
-  inspection hex.
-- Gotek : préparation d'un répertoire de disquettes `.adf` pour la clé USB,
-  validation des images.
-
-**À venir** :
-- Système de fichiers CPC (annuaire + fichiers nommés) au-dessus du noyau ADF,
-  pour copier des programmes / données vers la disquette (niveaux `list`,
-  `write`, `read` à la façon du Filer CPC).
-- Image FAT complète `.img` pour cloner directement la clé Gotek (dépend d'un
-  outil `mformat`/`mkfs.fat`).
-
-> **Validation du format** : la disposition octet par octet de l'en-tête ADF et
-> des secteurs est documentée dans `cpc_dsk/core/adf.py` et est autocohérente.
-> À valider contre un émulateur (Fuse/CPCJS) et/ou un fichier `.dsk` de
-> référence ; les constantes de format y sont centralisées.
+- L'écriture crée des **fichiers AMSDOS** (lisibles par les lecteurs qui
+  balayent les en-têtes, ex. CERMU) mais **ne met pas encore à jour le
+  répertoire traditionnel CPC** (piste 0, secteur 0). À finaliser pour une
+  compatibilité totale du DOS CPC / Gotek sur matériel réel.
+- L'image FAT complète pour cloner directement la clé Gotek dépend d'un outil
+  `mformat`/`mkfs.fat` (sinon on copie le répertoire généré sur une clé
+  formatée FAT16/FAT32).
 
 ## Licence
 

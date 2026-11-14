@@ -1,11 +1,13 @@
 """Interface en ligne de commande de cpc_dsk.
 
-Usage:
+Commandes :
     cpc-dsk new   <sortie.dsk> [--tracks N] [--sides N] [--sectors N] [--sector-size N]
     cpc-dsk info  <disk.dsk>
-    cpc-dsk sector <disk.dsk> <piste> <face> <secteur> [--write-file LOCAL]
-    cpc-dsk hex   <disk.dsk> <piste> <face> <secteur>
-    cpc-dsk dump  <disk.dsk> <piste> <face> <secteur> --out LOCAL
+    cpc-dsk list  <disk.dsk>
+    cpc-dsk read  <disk.dsk> <nom> --out <local>
+    cpc-dsk write <disk.dsk> <nom> <local> [--type basic|binary] [--load 0xADDR]
+    cpc-dsk hex   <disk.dsk> <piste> <secteur>
+    cpc-dsk sector <disk.dsk> <piste> <secteur> [--write-file LOCAL]
 """
 
 from __future__ import annotations
@@ -15,21 +17,23 @@ import sys
 
 from cpc_dsk.core import geometry
 from cpc_dsk.core.adf import ADFDisk, ADFError
+from cpc_dsk.core.cpcfs import (
+    CpcError,
+    CpcFilesystem,
+    FT_BASIC,
+    FT_BINARY,
+)
 
 
 # --------------------------------------------------------------------------- #
-# Helpers d'affichage
+# Helpers
 # --------------------------------------------------------------------------- #
 def hexdump(data: bytes, width: int = 16) -> str:
-    """Formate ``data`` en hexdump classique (offset | hex | ASCII)."""
     lines = []
     for offset in range(0, len(data), width):
         chunk = data[offset:offset + width]
-        hex_part = " ".join(f"{b:02X}" for b in chunk)
-        # Pad à largeur constante pour l'alignement.
-        hex_part = hex_part.ljust(width * 3 - 1)
-        ascii_part = "".join(
-            chr(b) if 32 <= b < 127 else "." for b in chunk)
+        hex_part = " ".join(f"{b:02X}" for b in chunk).ljust(width * 3 - 1)
+        ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
         lines.append(f"{offset:08X}  {hex_part}  |{ascii_part}|")
     return "\n".join(lines)
 
@@ -42,30 +46,68 @@ def _load(path: str) -> ADFDisk:
         raise SystemExit(1)
 
 
+def _fs(disk: ADFDisk) -> CpcFilesystem:
+    return CpcFilesystem(disk)
+
+
 # --------------------------------------------------------------------------- #
 # Sous-commandes
 # --------------------------------------------------------------------------- #
 def cmd_new(args) -> None:
-    disk = ADFDisk(tracks=args.tracks, sides=args.sides,
-                   sectors_per_track=args.sectors, sector_size=args.sector_size)
+    disk = ADFDisk.new_blank(
+        tracks=args.tracks, sides=args.sides,
+        sectors=args.sectors, sector_size=args.sector_size)
     disk.save(args.output)
-    print(f"Disquette ADF créée: {args.output}")
-    print(f"  géométrie : {disk.tracks} pistes x {disk.sides} faces "
-          f"x {disk.sectors_per_track} secteurs x {disk.sector_size} o")
-    print(f"  capacité  : {disk.data_capacity} octets "
-          f"({disk.data_capacity // 1024} Ko)")
-    print(f"  taille    : {disk.expected_file_size()} octets")
+    print(f"Disquette créée: {args.output}")
+    print(f"  {disk.summary()}")
 
 
 def cmd_info(args) -> None:
     disk = _load(args.disk)
-    print(f"Fichier   : {args.disk}")
-    print(f"Géométrie : {disk.tracks} pistes x {disk.sides} faces "
-          f"x {disk.sectors_per_track} secteurs x {disk.sector_size} o")
-    print(f"Secteurs  : {disk.total_sectors}")
-    print(f"Capacité  : {disk.data_capacity} octets "
-          f"({disk.data_capacity // 1024} Ko)")
-    print(f"Fichier   : {disk.expected_file_size()} octets attendus")
+    print(f"Fichier : {args.disk}")
+    print(f"  {disk.summary()}")
+    print(f"Fichiers (AMSDOS):")
+    for f in _fs(disk).list_files():
+        print(f"  {f.name:14s} {f.type_name:6s} len={f.length:6d} "
+              f"load={f.load_addr:#06x} @0x{f.offset:06X}")
+
+
+def cmd_list(args) -> None:
+    disk = _load(args.disk)
+    files = _fs(disk).list_files()
+    if not files:
+        print("(aucun fichier AMSDOS détecté)")
+        return
+    for f in files:
+        print(f"{f.name:14s} {f.type_name:6s} len={f.length:6d} "
+              f"load={f.load_addr:#06x} @0x{f.offset:06X}")
+
+
+def cmd_read(args) -> None:
+    disk = _load(args.disk)
+    data = _fs(disk).read_file(args.name)
+    with open(args.out, "wb") as fh:
+        fh.write(data)
+    print(f"Fichier {args.name!r} ({len(data)} o) extrait vers {args.out}.")
+
+
+def cmd_write(args) -> None:
+    disk = _load(args.disk)
+    with open(args.local, "rb") as fh:
+        data = fh.read()
+    ftype = FT_BASIC if args.type == "basic" else FT_BINARY
+    f = _fs(disk).write_file(
+        args.name, data, file_type=ftype,
+        load_addr=args.load, exec_addr=args.load)
+    disk.save(args.disk)
+    print(f"Fichier {f.name!r} ({f.length} o, {f.type_name}) "
+          f"écrit sur {args.disk} @0x{f.offset:06X}.")
+
+
+def cmd_hex(args) -> None:
+    disk = _load(args.disk)
+    data = disk.get_sector(args.track, args.sector)
+    print(hexdump(data))
 
 
 def cmd_sector(args) -> None:
@@ -73,88 +115,79 @@ def cmd_sector(args) -> None:
     if args.write_file:
         with open(args.write_file, "rb") as fh:
             data = fh.read()
-        disk.set_sector(args.track, args.side, args.sector, data)
+        disk.set_sector(args.track, args.sector, data)
         disk.save(args.disk)
-        print(f"Secteur ({args.track},{args.side},{args.sector}) "
+        print(f"Secteur (piste={args.track} secteur={args.sector}) "
               f"écrit depuis {args.write_file}.")
     else:
-        data = disk.get_sector(args.track, args.side, args.sector)
-        print(f"Secteur (piste={args.track} face={args.side} "
-              f"secteur={args.sector}) — {len(data)} octets:")
+        data = disk.get_sector(args.track, args.sector)
+        print(f"Secteur (piste={args.track} secteur={args.sector}) "
+              f"— {len(data)} octets:")
         print(hexdump(data))
-
-
-def cmd_hex(args) -> None:
-    disk = _load(args.disk)
-    data = disk.get_sector(args.track, args.side, args.sector)
-    print(hexdump(data))
-
-
-def cmd_dump(args) -> None:
-    disk = _load(args.disk)
-    data = disk.get_sector(args.track, args.side, args.sector)
-    with open(args.out, "wb") as fh:
-        fh.write(data)
-    print(f"Secteur ({args.track},{args.side},{args.sector}) "
-          f"exporté vers {args.out}.")
 
 
 # --------------------------------------------------------------------------- #
 # Parseur
 # --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    p = argparse.ArgumentParser(
         prog="cpc-dsk",
-        description="Éditeur de disquettes virtuelles .dsk (ADF) pour Amstrad CPC.")
-    sub = parser.add_subparsers(dest="command", required=True)
+        description="Éditeur de disquettes virtuelles .dsk (CPC) & Gotek.")
+    sub = p.add_subparsers(dest="command", required=True)
 
-    p_new = sub.add_parser("new", help="Créer une disquette ADF vierge.")
-    p_new.add_argument("output", help="Fichier .dsk à créer.")
-    p_new.add_argument("--tracks", type=int, default=geometry.TRACKS_PER_SIDE)
-    p_new.add_argument("--sides", type=int, default=geometry.NUM_SIDES)
-    p_new.add_argument("--sectors", type=int, default=geometry.SECTORS_PER_TRACK)
-    p_new.add_argument("--sector-size", type=int, default=geometry.SECTOR_SIZE)
-    p_new.set_defaults(func=cmd_new)
+    n = sub.add_parser("new", help="Créer une disquette vierge.")
+    n.add_argument("output")
+    n.add_argument("--tracks", type=int, default=geometry.DEFAULT_TRACKS)
+    n.add_argument("--sides", type=int, default=geometry.DEFAULT_SIDES)
+    n.add_argument("--sectors", type=int, default=geometry.DEFAULT_SECTORS)
+    n.add_argument("--sector-size", type=int, default=geometry.DEFAULT_SECTOR_SIZE)
+    n.set_defaults(func=cmd_new)
 
-    p_info = sub.add_parser("info", help="Afficher les informations d'une disquette.")
-    p_info.add_argument("disk", help="Fichier .dsk.")
-    p_info.set_defaults(func=cmd_info)
+    i = sub.add_parser("info", help="Infos géométrie + fichiers.")
+    i.add_argument("disk")
+    i.set_defaults(func=cmd_info)
 
-    p_sec = sub.add_parser("sector",
-                           help="Lire un secteur brut (ou l'écrire avec --write-file).")
-    p_sec.add_argument("disk", help="Fichier .dsk.")
-    p_sec.add_argument("track", type=int, help="N° de piste (0-39).")
-    p_sec.add_argument("side", type=int, help="N° de face (0-1).")
-    p_sec.add_argument("sector", type=int, help="N° de secteur (0-9).")
-    p_sec.add_argument("--write-file",
-                       help="Fichier local dont le contenu est écrit dans le secteur.")
-    p_sec.set_defaults(func=cmd_sector)
+    l = sub.add_parser("list", help="Lister les fichiers (AMSDOS).")
+    l.add_argument("disk")
+    l.set_defaults(func=cmd_list)
 
-    p_hex = sub.add_parser("hex", help="Hexdump d'un secteur brut.")
-    p_hex.add_argument("disk", help="Fichier .dsk.")
-    p_hex.add_argument("track", type=int)
-    p_hex.add_argument("side", type=int)
-    p_hex.add_argument("sector", type=int)
-    p_hex.set_defaults(func=cmd_hex)
+    r = sub.add_parser("read", help="Extraire un fichier vers un fichier local.")
+    r.add_argument("disk")
+    r.add_argument("name", help="Nom du fichier sur la disquette.")
+    r.add_argument("--out", required=True, help="Fichier de sortie local.")
+    r.set_defaults(func=cmd_read)
 
-    p_dump = sub.add_parser("dump", help="Exporter un secteur brut vers un fichier.")
-    p_dump.add_argument("disk", help="Fichier .dsk.")
-    p_dump.add_argument("track", type=int)
-    p_dump.add_argument("side", type=int)
-    p_dump.add_argument("sector", type=int)
-    p_dump.add_argument("--out", required=True, help="Fichier de sortie.")
-    p_dump.set_defaults(func=cmd_dump)
+    w = sub.add_parser("write", help="Copier un fichier local sur la disquette.")
+    w.add_argument("disk")
+    w.add_argument("name", help="Nom du fichier sur la disquette (8.3).")
+    w.add_argument("local", help="Fichier local à copier.")
+    w.add_argument("--type", choices=["basic", "binary"], default="binary")
+    w.add_argument("--load", type=lambda s: int(s, 0), default=0x4000,
+                   help="Adresse de chargement (décimal ou 0xhex).")
+    w.set_defaults(func=cmd_write)
 
-    return parser
+    h = sub.add_parser("hex", help="Hexdump d'un secteur.")
+    h.add_argument("disk")
+    h.add_argument("track", type=int)
+    h.add_argument("sector", type=int)
+    h.set_defaults(func=cmd_hex)
+
+    s = sub.add_parser("sector", help="Lire/écrire un secteur brut.")
+    s.add_argument("disk")
+    s.add_argument("track", type=int)
+    s.add_argument("sector", type=int)
+    s.add_argument("--write-file", help="Fichier local à écrire dans le secteur.")
+    s.set_defaults(func=cmd_sector)
+
+    return p
 
 
 def main(argv=None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
     try:
         args.func(args)
-    except ADFError as exc:
-        print(f"Erreur ADF: {exc}", file=sys.stderr)
+    except (ADFError, CpcError) as exc:
+        print(f"Erreur: {exc}", file=sys.stderr)
         raise SystemExit(1)
 
 

@@ -1,288 +1,279 @@
-"""Lecture / écriture du format d'image de disque ADF (Amstrad Disk File).
+"""Conteneur d'image de disque CPC : format « EXTENDED CPC DSK » / ADF.
 
-Le format ADF est une image « brute » des pistes d'une disquette CPC, telle
-qu'utilisée par les émulateurs (Fuse, CPCJS). Ce module permet de :
+Ce module implémente le **conteneur** des images ``.dsk`` du CPC, tel que
+produit par WinAPE / SAMdisk et lu par les émulateurs (Fuse, CPCJS, CERMU).
+Le système de fichiers (fichiers AMSDOS) est dans :mod:`cpc_dsk.core.cpcfs`.
 
-    - créer une disquette vierge,
-    - lire / écrire des secteurs bruts,
-    - sauvegarder / charger une image ``.dsk``.
-
-Structure de fichier implémentée (documentée, autocohérente)
-=============================================================
+Structure du fichier
+====================
 ::
 
-    +---------------------------+
-    | En-tête de fichier (40 o) |
-    +---------------------------+
-    | Piste 0, face 0 : 10 sect. |
-    | Piste 0, face 1 : 10 sect. |
-    |   ...                     |
-    | Piste 39, face 1: 10 sect. |
-    +---------------------------+
+    +-----------------------------+
+    | Disk-Info (256 octets)      |  magic + géométrie + tailles des pistes
+    +-----------------------------+
+    | Piste 0 : Track-Info (256 o)|
+    |           + données secteurs|
+    | Piste 1 : Track-Info (256 o)|
+    |           + données secteurs|
+    |    ...                      |
+    +-----------------------------+
 
-En-tête (40 octets)
--------------------
-::
-
-    Offset  Taille  Champ
-    0x00    4       signature  b"CPC1"
-    0x04    1       version    = 1
-    0x05    1       pistes/face = 40
-    0x06    1       faces       = 2
-    0x07    1       secteurs/piste = 10
-    0x08    2       taille secteur (256, little-endian)
-    0x0A    30      réservé (0x00)
-
-Secteur (270 octets), disposition canonique FM/MFM « logique »
---------------------------------------------------------------
+Disk-Info (256 octets)
+----------------------
 ::
 
     Offset  Taille  Champ
-    0x00    4       préambule / synchronisation (0x00 x4)
-    0x04    1       marque d'adresse ID   = 0xFE
-    0x05    1       cylindre (n° de piste)
-    0x06    1       tête  (n° de face)
-    0x07    1       secteur
-    0x08    1       encodage  = 0x02 (densité double / MFM)
-    0x09    1       taille données (haute)  = 0x01
-    0x0A    1       taille données (basse)  = 0x00   -> 256
-    0x0B    1       checksum du champ ID
-    0x0C    1       marque d'adresse données = 0xFE
-    0x0D   256      données du secteur
-    0xBD    1       checksum des données
+    0x00    34      magic
+                        Extended : "EXTENDED CPC DSK File\r\nDisk-Info\r\n"
+                        Standard : "MV - CPCEMU Disk-File\r\nDisk-Info\r\n"
+    0x22    14      chaîne « créateur » (outil qui a produit l'image)
+    0x30    1       nb de pistes
+    0x31    1       nb de faces
+    0x32    2       taille uniforme des pistes (LE16) — format Standard
+    0x34    N       taille de chaque piste (1 o, ×256 = octets) — format Extended
+    0xFF ...        réserve (0)
 
-Ordre des secteurs dans le fichier : piste (majeure) -> face -> secteur.
-Index linéaire :  (piste * faces + face) * secteurs/piste + secteur.
+Bloc piste
+----------
+::
 
-NOTE DE VALIDATION
-==================
-La géométrie (40/2/10/256) est celle du format standard CPC. La disposition
-octet par octet de l'en-tête et des secteurs est une implémentation propre,
-autocohérente (testée en aller-retour). Si une image produite n'est pas
-reconnue par un émulateur précis, ajuster les constantes ``ADF_*`` ci-dessous
-pour coller à la référence exacte (source libspectrum / Fuse).
+    Offset  Taille  Champ
+    0x00    12      "Track-Info\r\n"
+    0x15    1       nb de secteurs de la piste
+    0x100   ...     données des secteurs (contiguës, taille = taille_piste-256)
+
+La taille d'un bloc piste (donnée dans le tableau des pistes) est un multiple
+de 256 ; les données de secteurs occupent ``taille_piste - 256`` octets, soit
+``nb_secteurs`` secteurs de ``(taille_piste-256)/nb_secteurs`` octets chacun
+(par ex. 9 secteurs × 512 o = 4608 o, bloc de 4864 o).
 """
 
 from __future__ import annotations
 
 import os
-import struct
-from typing import Iterator, List
+from typing import Iterator, List, Tuple
 
-from cpc_dsk.core import geometry
+# --- Constantes du format (point unique d'ajustement) ---
+MAGIC_EXTENDED = b"EXTENDED CPC DSK File\r\nDisk-Info\r\n"
+MAGIC_STANDARD = b"MV - CPCEMU Disk-File\r\nDisk-Info\r\n"
+CREATOR_OFFSET = 0x22
+CREATOR_SIZE = 14
+NUM_TRACKS_OFFSET = 0x30
+NUM_SIDES_OFFSET = 0x31
+STD_TRACK_SIZE_OFFSET = 0x32
+EXT_TRACK_SIZE_TABLE_OFFSET = 0x34
 
-# --- Constantes du format ADF (point unique d'ajustement) ---
-ADF_SIGNATURE = b"CPC1"
-ADF_VERSION = 1
-ADF_HEADER_SIZE = 40
-
-SYNC_BYTES = 4                 # préambule avant le champ ID
-ADDR_MARK = 0xFE               # marque d'adresse (FM/MFM logique)
-ENCODING_MFM = 0x02            # densité double
-
-# Taille d'un secteur « encodé » dans l'image (voir docstring).
-SECTOR_RECORD_SIZE = (SYNC_BYTES + 1 + 7 + 1 + geometry.SECTOR_SIZE + 1)
-# = 4 + 1 + 7 + 1 + 256 + 1 = 270 octets
+DISK_INFO_SIZE = 256
+TRACK_INFO_SIZE = 256
+TRACK_INFO_MAGIC = b"Track-Info\r\n"
+TRACK_INFO_NUM_SECTORS_OFFSET = 0x15
 
 
 class ADFError(Exception):
-    """Erreur de lecture / écriture du format ADF."""
-
-
-def _checksum(data: bytes) -> int:
-    """Checksum simple (somme mod 256) — suffisant pour l'autocohérence."""
-    return sum(data) & 0xFF
+    """Erreur de lecture / écriture du conteneur .dsk."""
 
 
 class ADFDisk:
-    """Modèle mémoire d'une disquette ADF (tableau de secteurs bruts)."""
+    """Modèle d'une image de disquette CPC (conteneur EXTENDED/Standard DSK).
 
-    def __init__(self,
-                 tracks: int = geometry.TRACKS_PER_SIDE,
-                 sides: int = geometry.NUM_SIDES,
-                 sectors_per_track: int = geometry.SECTORS_PER_TRACK,
-                 sector_size: int = geometry.SECTOR_SIZE):
-        if tracks <= 0 or sides <= 0 or sectors_per_track <= 0 or sector_size <= 0:
-            raise ADFError("Géométrie invalide (toutes les valeurs doivent être > 0).")
-        self.tracks = tracks
-        self.sides = sides
-        self.sectors_per_track = sectors_per_track
-        self.sector_size = sector_size
-        total = tracks * sides * sectors_per_track
-        self._sectors: List[bytearray] = [bytearray(sector_size) for _ in range(total)]
+    L'image est conservée en mémoire comme tableau d'octets brut ; les méthodes
+    de navigation (pistes, secteurs) opèrent directement dessus.
+    """
+
+    def __init__(self, raw: bytes, creator: str = "cpc-dsk v0.1"):
+        self._raw = bytearray(raw)
+        self._creator = creator
+        self.extended = True
+        self.num_tracks = 0
+        self.num_sides = 1
+        self.track_sizes: List[int] = []
+        self.track_offsets: List[int] = []
+        self._parse_header()
 
     # ------------------------------------------------------------------ #
-    # Fabrication
+    # Analyse de l'en-tête
     # ------------------------------------------------------------------ #
-    @classmethod
-    def new_blank(cls) -> "ADFDisk":
-        """Crée une disquette vierge (géométrie standard CPC)."""
-        return cls()
+    def _parse_header(self) -> None:
+        raw = self._raw
+        if len(raw) < DISK_INFO_SIZE:
+            raise ADFError(
+                f"Fichier trop court ({len(raw)} o) pour un en-tête "
+                f"Disk-Info de {DISK_INFO_SIZE} o.")
+        if raw[:len(MAGIC_EXTENDED)] == MAGIC_EXTENDED:
+            self.extended = True
+        elif raw[:len(MAGIC_STANDARD)] == MAGIC_STANDARD:
+            self.extended = False
+        elif raw[0:8] == b"EXTENDED" or raw[0:8] == b"MV - CPC":
+            # Variante écourtée du magic : on tolère si le préfixe colle.
+            self.extended = raw[0] == ord("E")
+        else:
+            raise ADFError(
+                f"Magic inconnu: {raw[:16]!r}. Ce fichier n'est pas une image "
+                ".dsk CPC (attendu 'EXTENDED CPC DSK File' ou 'MV - CPCEMU "
+                "Disk-File').")
 
+        self.num_tracks = raw[NUM_TRACKS_OFFSET]
+        self.num_sides = raw[NUM_SIDES_OFFSET]
+        if self.num_tracks == 0:
+            raise ADFError("Nombre de pistes nul dans le Disk-Info.")
+
+        if self.extended:
+            self.track_sizes = [
+                raw[EXT_TRACK_SIZE_TABLE_OFFSET + t] * 256
+                for t in range(self.num_tracks)
+            ]
+        else:
+            ts = raw[STD_TRACK_SIZE_OFFSET] | (raw[STD_TRACK_SIZE_OFFSET + 1] << 8)
+            self.track_sizes = [ts] * self.num_tracks
+
+        # Offsets cumulés des blocs piste.
+        self.track_offsets = []
+        off = DISK_INFO_SIZE
+        for sz in self.track_sizes:
+            if sz <= TRACK_INFO_SIZE:
+                raise ADFError("Taille de piste invalide (<= 256 o).")
+            self.track_offsets.append(off)
+            off += sz
+        if off != len(raw):
+            raise ADFError(
+                f"Taille de fichier incohérente: {len(raw)} o, attendu {off} "
+                f"selon le Disk-Info.")
+
+    # ------------------------------------------------------------------ #
+    # Persistance
+    # ------------------------------------------------------------------ #
     @classmethod
     def load(cls, path: str) -> "ADFDisk":
-        """Charge une image ``.dsk`` depuis le disque."""
         with open(path, "rb") as fh:
-            data = fh.read()
-        return cls._from_bytes(data)
+            return cls(fh.read())
 
     def save(self, path: str) -> None:
-        """Sauvegarde l'image ``.dsk`` sur le disque."""
         directory = os.path.dirname(os.path.abspath(path))
         os.makedirs(directory, exist_ok=True)
         with open(path, "wb") as fh:
-            fh.write(self._to_bytes())
+            fh.write(bytes(self._raw))
 
     # ------------------------------------------------------------------ #
-    # Accès aux secteurs
+    # Fabrication d'une disquette vierge
     # ------------------------------------------------------------------ #
-    def _flat_index(self, track: int, side: int, sector: int) -> int:
-        if not geometry.is_valid_address(track, side, sector,
-                                         self.tracks, self.sides,
-                                         self.sectors_per_track):
-            raise ADFError(
-                f"Adresse secteur hors bornes: piste={track} face={side} "
-                f"secteur={sector} (pistes={self.tracks}, faces={self.sides}, "
-                f"secteurs/piste={self.sectors_per_track}).")
-        return (track * self.sides + side) * self.sectors_per_track + sector
-
-    def get_sector(self, track: int, side: int, sector: int) -> bytes:
-        """Renvoie les ``sector_size`` octets bruts du secteur."""
-        return bytes(self._sectors[self._flat_index(track, side, sector)])
-
-    def set_sector(self, track: int, side: int, sector: int, data: bytes) -> None:
-        """Écrit ``sector_size`` octets dans le secteur (taille vérifiée)."""
-        if len(data) != self.sector_size:
-            raise ADFError(
-                f"Taille de données invalide: {len(data)} octets, "
-                f"attendu {self.sector_size}.")
-        idx = self._flat_index(track, side, sector)
-        self._sectors[idx] = bytearray(data)
-
-    def iter_sectors(self) -> Iterator[tuple]:
-        """Itère sur tous les secteurs : ``(piste, face, secteur, données)``."""
-        for track in range(self.tracks):
-            for side in range(self.sides):
-                for sector in range(self.sectors_per_track):
-                    yield track, side, sector, self.get_sector(track, side, sector)
-
-    # ------------------------------------------------------------------ #
-    # Sérialisation
-    # ------------------------------------------------------------------ #
-    def _to_bytes(self) -> bytes:
-        out = bytearray(self._build_header())
-        for _track, _side, _sector, data in self.iter_sectors():
-            # L'ordre d'itération est déjà piste->face->secteur.
-            out += self._encode_sector(_track, _side, _sector, data)
-        return bytes(out)
-
     @classmethod
-    def _from_bytes(cls, data: bytes) -> "ADFDisk":
-        header = data[:ADF_HEADER_SIZE]
-        (sig, version, tracks, sides, sectors_per_track,
-         sector_size) = cls._parse_header(header)
-        if sig != ADF_SIGNATURE:
-            raise ADFError(
-                f"Signature ADF invalide: {sig!r} (attendu {ADF_SIGNATURE!r}). "
-                "Le fichier n'est peut-être pas une image ADF CPC.")
-        disk = cls(tracks=tracks, sides=sides,
-                   sectors_per_track=sectors_per_track, sector_size=sector_size)
+    def new_blank(cls,
+                  tracks: int = 40,
+                  sides: int = 1,
+                  sectors: int = 9,
+                  sector_size: int = 512,
+                  creator: str = "cpc-dsk v0.1") -> "ADFDisk":
+        """Crée une disquette vierge au format Extended.
 
-        expected = ADF_HEADER_SIZE + disk.total_sectors * SECTOR_RECORD_SIZE
+        Par défaut, géométrie identique à une disquette CPC réelle (40 pistes,
+        1 face, 9 secteurs × 512 o). La taille de bloc doit être un multiple de
+        256 (256 + secteurs×taille_secteur).
+        """
+        if tracks <= 0 or sides <= 0 or sectors <= 0 or sector_size <= 0:
+            raise ADFError("Géométrie invalide.")
+        track_data_size = sectors * sector_size
+        if track_data_size % 256 != 0:
+            raise ADFError(
+                f"secteurs×taille_secteur ({track_data_size}) doit être un "
+                f"multiple de 256 pour ce format.")
+        track_block = TRACK_INFO_SIZE + track_data_size  # multiple de 256
+        track_byte = track_block // 256
+
+        # Disk-Info (256 o)
+        header = bytearray(DISK_INFO_SIZE)
+        magic = MAGIC_EXTENDED
+        header[0:len(magic)] = magic
+        creator_bytes = creator.encode("latin1")[:CREATOR_SIZE]
+        header[CREATOR_OFFSET:CREATOR_OFFSET + len(creator_bytes)] = creator_bytes
+        header[NUM_TRACKS_OFFSET] = tracks
+        header[NUM_SIDES_OFFSET] = sides
+        for t in range(tracks):
+            header[EXT_TRACK_SIZE_TABLE_OFFSET + t] = track_byte
+
+        # Blocs piste
+        blocks = bytearray()
+        for _ in range(tracks):
+            ti = bytearray(TRACK_INFO_SIZE)
+            ti[0:len(TRACK_INFO_MAGIC)] = TRACK_INFO_MAGIC
+            ti[TRACK_INFO_NUM_SECTORS_OFFSET] = sectors
+            blocks += ti
+            blocks += bytes(track_data_size)  # secteurs à zéro
+
+        return cls(bytes(header) + bytes(blocks), creator=creator)
+
+    # ------------------------------------------------------------------ #
+    # Accès pistes / secteurs
+    # ------------------------------------------------------------------ #
+    def _check_track(self, track: int) -> None:
+        if not (0 <= track < self.num_tracks):
+            raise ADFError(
+                f"Piste hors bornes: {track} (0..{self.num_tracks - 1}).")
+
+    def num_sectors(self, track: int) -> int:
+        """Nombre de secteurs de la piste (champ Track-Info[0x15])."""
+        self._check_track(track)
+        return self._raw[self.track_offsets[track] + TRACK_INFO_NUM_SECTORS_OFFSET]
+
+    def get_track_data(self, track: int) -> bytes:
+        """Données brutes des secteurs de la piste (après l'en-tête Track-Info)."""
+        self._check_track(track)
+        off = self.track_offsets[track] + TRACK_INFO_SIZE
+        return bytes(self._raw[off:off + self.track_sizes[track] - TRACK_INFO_SIZE])
+
+    def set_track_data(self, track: int, data: bytes) -> None:
+        self._check_track(track)
+        expected = self.track_sizes[track] - TRACK_INFO_SIZE
         if len(data) != expected:
             raise ADFError(
-                f"Taille de fichier incohérente: {len(data)} octets, "
-                f"attendu {expected} pour cette géométrie.")
+                f"Taille de données piste invalide: {len(data)} o, attendu "
+                f"{expected} o.")
+        off = self.track_offsets[track] + TRACK_INFO_SIZE
+        self._raw[off:off + expected] = data
 
-        offset = ADF_HEADER_SIZE
-        for track in range(tracks):
-            for side in range(sides):
-                for sector in range(sectors_per_track):
-                    record = data[offset:offset + SECTOR_RECORD_SIZE]
-                    offset += SECTOR_RECORD_SIZE
-                    payload = cls._decode_sector(record, track, side, sector,
-                                                 sector_size)
-                    idx = (track * sides + side) * sectors_per_track + sector
-                    disk._sectors[idx] = bytearray(payload)
-        return disk
-
-    # --- En-tête ---
-    def _build_header(self) -> bytes:
-        reserved = bytes(ADF_HEADER_SIZE - 10)
-        return (ADF_SIGNATURE
-                + bytes([ADF_VERSION, self.tracks, self.sides,
-                         self.sectors_per_track])
-                + struct.pack("<H", self.sector_size)
-                + reserved)
-
-    @staticmethod
-    def _parse_header(header: bytes):
-        if len(header) < ADF_HEADER_SIZE:
-            raise ADFError("En-tête ADF tronqué.")
-        sig = header[0:4]
-        version = header[4]
-        tracks = header[5]
-        sides = header[6]
-        sectors_per_track = header[7]
-        sector_size = struct.unpack("<H", header[8:10])[0]
-        return sig, version, tracks, sides, sectors_per_track, sector_size
-
-    # --- Secteur ---
-    @classmethod
-    def _encode_sector(cls, track: int, side: int, sector: int, data: bytes) -> bytes:
-        if len(data) != geometry.SECTOR_SIZE and len(data) != cls.sector_size:
-            pass  # la taille exacte est imposée par set_sector / load
-        id_field = bytes([track, side, sector,
-                          ENCODING_MFM,
-                          (len(data) >> 8) & 0xFF, len(data) & 0xFF])
-        id_checksum = _checksum(id_field)
-        id_block = bytes([ADDR_MARK]) + id_field + bytes([id_checksum])
-        data_block = bytes([ADDR_MARK]) + bytes(data) + bytes([_checksum(data)])
-        return bytes(SYNC_BYTES) + id_block + data_block
-
-    @classmethod
-    def _decode_sector(cls, record: bytes, track: int, side: int,
-                       sector: int, sector_size: int) -> bytes:
-        if len(record) != SECTOR_RECORD_SIZE:
-            raise ADFError("Secteur ADF tronqué.")
-        # Vérifie la cohérence du champ ID (piste/face/secteur).
-        id_track = record[SYNC_BYTES + 1]
-        id_side = record[SYNC_BYTES + 2]
-        id_sector = record[SYNC_BYTES + 3]
-        if (id_track, id_side, id_sector) != (track, side, sector):
+    def get_sector(self, track: int, sector: int) -> bytes:
+        """Un secteur de la piste (taille = (taille_piste-256)/nb_secteurs)."""
+        ns = self.num_sectors(track)
+        if ns == 0:
+            raise ADFError("Piste sans secteur.")
+        if not (0 <= sector < ns):
             raise ADFError(
-                f"Champ ID incohérent: (piste,face,secteur)=({id_track},"
-                f"{id_side},{id_sector}) attendu ({track},{side},{sector}).")
-        size_hi = record[SYNC_BYTES + 5]
-        size_lo = record[SYNC_BYTES + 6]
-        declared_size = (size_hi << 8) | size_lo
-        if declared_size != sector_size:
+                f"Secteur hors bornes: {sector} (0..{ns - 1}) sur la piste {track}.")
+        td = self.get_track_data(track)
+        ss = len(td) // ns
+        return td[sector * ss:(sector + 1) * ss]
+
+    def set_sector(self, track: int, sector: int, data: bytes) -> None:
+        ns = self.num_sectors(track)
+        if ns == 0:
+            raise ADFError("Piste sans secteur.")
+        if not (0 <= sector < ns):
             raise ADFError(
-                f"Taille secteur déclarée incohérente: {declared_size} "
-                f"attendu {sector_size}.")
-        # Les données débutent juste après le champ ID (8 octets) + AM (1 octet).
-        data_start = SYNC_BYTES + 1 + 7 + 1
-        data = record[data_start:data_start + sector_size]
-        return bytes(data)
+                f"Secteur hors bornes: {sector} (0..{ns - 1}) sur la piste {track}.")
+        td = bytearray(self.get_track_data(track))
+        ss = len(td) // ns
+        if len(data) != ss:
+            raise ADFError(
+                f"Taille de secteur invalide: {len(data)} o, attendu {ss} o.")
+        td[sector * ss:(sector + 1) * ss] = data
+        self.set_track_data(track, bytes(td))
+
+    def iter_data(self) -> Iterator[Tuple[int, bytes]]:
+        """Itère sur les données de toutes les pistes: ``(piste, données)``."""
+        for track in range(self.num_tracks):
+            yield track, self.get_track_data(track)
 
     # ------------------------------------------------------------------ #
     # Informations
     # ------------------------------------------------------------------ #
     @property
-    def total_sectors(self) -> int:
-        """Nombre total de secteurs de la disquette."""
-        return self.tracks * self.sides * self.sectors_per_track
+    def file_size(self) -> int:
+        return len(self._raw)
 
-    @property
-    def data_capacity(self) -> int:
-        """Capacité de données utilisateur en octets."""
-        return self.total_sectors * self.sector_size
+    def summary(self) -> str:
+        fmt = "Extended" if self.extended else "Standard"
+        return (f"format={fmt} pistes={self.num_tracks} faces={self.num_sides} "
+                f"taille_fichier={self.file_size} o "
+                f"tailles_pistes={sorted(set(self.track_sizes))}")
 
-    def expected_file_size(self) -> int:
-        """Taille attendue du fichier ``.dsk`` sur disque."""
-        return ADF_HEADER_SIZE + self.total_sectors * SECTOR_RECORD_SIZE
-
-    def __repr__(self) -> str:  # pragma: no cover - affichage
-        return (f"ADFDisk(pistes={self.tracks}, faces={self.sides}, "
-                f"secteurs/piste={self.sectors_per_track}, "
-                f"taille_secteur={self.sector_size})")
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"ADFDisk({self.summary()})"
