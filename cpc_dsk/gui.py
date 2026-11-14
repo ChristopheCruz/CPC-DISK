@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from typing import List
 
 from cpc_dsk.core.adf import ADFDisk, ADFError
-from cpc_dsk.core.cpcfs import CpcFilesystem
+from cpc_dsk.core.cpcfs import CpcFile, CpcFilesystem
 from cpc_dsk.cli import hexdump
 
 
@@ -25,6 +26,7 @@ class DskEditorApp:
 
         self.disk: ADFDisk | None = None
         self.path: str | None = None
+        self._files: List[CpcFile] = []
 
         self._build_toolbar()
         self._build_info()
@@ -130,27 +132,28 @@ class DskEditorApp:
         self.info.config(text=self.disk.summary())
         self.file_list.delete(0, "end")
         fs = CpcFilesystem(self.disk)
-        for f in fs.list_files():
-            self.file_list.insert("end", f"{f.name}  [{f.type_name} {f.length}o]")
+        self._files: List[CpcFile] = fs.list_files()
+        for f in self._files:
+            self.file_list.insert("end",
+                                  f"{f.name}  [{f.source} {f.type_name} {f.length}o]")
         self._show_hex(b"", "(sélectionne un fichier)")
 
     def _on_file_select(self, _event) -> None:
         sel = self.file_list.curselection()
         if not sel or self.disk is None:
             return
-        files = CpcFilesystem(self.disk).list_files()
         idx = sel[0]
-        if idx >= len(files):
+        if idx >= len(self._files):
             return
-        f = files[idx]
+        f = self._files[idx]
         try:
-            data = CpcFilesystem(self.disk).read_file(f.name)
+            data = CpcFilesystem(self.disk).read_file(f.name, source=f.source)
         except Exception as exc:  # noqa: BLE001 - affichage GUI
             self._show_hex(b"", f"erreur: {exc}")
             return
-        self._show_hex(data, f"{f.name}  [{f.type_name} {f.length} o] "
+        self._show_hex(data, f"{f.name}  [{f.source} {f.type_name} {f.length} o] "
                              f"load={f.load_addr:#06x}")
-        self._set_status(f"Fichier: {f.name}")
+        self._set_status(f"Fichier: {f.name} ({f.source})")
 
     def _show_hex(self, data: bytes, title: str) -> None:
         self.hex_text.config(state="normal")

@@ -3,9 +3,11 @@
 Commandes :
     cpc-dsk new   <sortie.dsk> [--tracks N] [--sides N] [--sectors N] [--sector-size N]
     cpc-dsk info  <disk.dsk>
-    cpc-dsk list  <disk.dsk>
-    cpc-dsk read  <disk.dsk> <nom> --out <local>
-    cpc-dsk write <disk.dsk> <nom> <local> [--type basic|binary] [--load 0xADDR]
+    cpc-dsk list  <disk.dsk> [--source filer|amsdos]
+    cpc-dsk read  <disk.dsk> <nom> --out <local> [--source filer|amsdos]
+    cpc-dsk write <disk.dsk> <nom> <local> [--fs both|filer|amsdos]
+                          [--type basic|binary] [--load 0xADDR]
+    cpc-dsk delete <disk.dsk> <nom>
     cpc-dsk hex   <disk.dsk> <piste> <secteur>
     cpc-dsk sector <disk.dsk> <piste> <secteur> [--write-file LOCAL]
 """
@@ -50,6 +52,11 @@ def _fs(disk: ADFDisk) -> CpcFilesystem:
     return CpcFilesystem(disk)
 
 
+def _format_file(f) -> str:
+    return (f"{f.name:14s} [{f.source:<12s}] {f.type_name:5s} "
+            f"len={f.length:6d} load={f.load_addr:#06x} @0x{f.offset:06X}")
+
+
 # --------------------------------------------------------------------------- #
 # Sous-commandes
 # --------------------------------------------------------------------------- #
@@ -66,26 +73,24 @@ def cmd_info(args) -> None:
     disk = _load(args.disk)
     print(f"Fichier : {args.disk}")
     print(f"  {disk.summary()}")
-    print(f"Fichiers (AMSDOS):")
+    print(f"Fichiers:")
     for f in _fs(disk).list_files():
-        print(f"  {f.name:14s} {f.type_name:6s} len={f.length:6d} "
-              f"load={f.load_addr:#06x} @0x{f.offset:06X}")
+        print(f"  {_format_file(f)}")
 
 
 def cmd_list(args) -> None:
     disk = _load(args.disk)
-    files = _fs(disk).list_files()
+    files = _fs(disk).list_files(source=args.source)
     if not files:
-        print("(aucun fichier AMSDOS détecté)")
+        print("(aucun fichier détecté)")
         return
     for f in files:
-        print(f"{f.name:14s} {f.type_name:6s} len={f.length:6d} "
-              f"load={f.load_addr:#06x} @0x{f.offset:06X}")
+        print(_format_file(f))
 
 
 def cmd_read(args) -> None:
     disk = _load(args.disk)
-    data = _fs(disk).read_file(args.name)
+    data = _fs(disk).read_file(args.name, source=args.source)
     with open(args.out, "wb") as fh:
         fh.write(data)
     print(f"Fichier {args.name!r} ({len(data)} o) extrait vers {args.out}.")
@@ -98,10 +103,18 @@ def cmd_write(args) -> None:
     ftype = FT_BASIC if args.type == "basic" else FT_BINARY
     f = _fs(disk).write_file(
         args.name, data, file_type=ftype,
-        load_addr=args.load, exec_addr=args.load)
+        load_addr=args.load, exec_addr=args.load,
+        mode=args.fs)
     disk.save(args.disk)
-    print(f"Fichier {f.name!r} ({f.length} o, {f.type_name}) "
+    print(f"Fichier {f.name!r} ({f.length} o, {f.source}) "
           f"écrit sur {args.disk} @0x{f.offset:06X}.")
+
+
+def cmd_delete(args) -> None:
+    disk = _load(args.disk)
+    _fs(disk).delete_file(args.name)
+    disk.save(args.disk)
+    print(f"Fichier {args.name!r} supprimé de {args.disk}.")
 
 
 def cmd_hex(args) -> None:
@@ -147,24 +160,38 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("disk")
     i.set_defaults(func=cmd_info)
 
-    l = sub.add_parser("list", help="Lister les fichiers (AMSDOS).")
+    l = sub.add_parser("list", help="Lister les fichiers (Filer + AMSDOS).")
     l.add_argument("disk")
+    l.add_argument("--source", choices=["filer", "amsdos"],
+                   help="N'afficher qu'une seule couche.")
     l.set_defaults(func=cmd_list)
 
     r = sub.add_parser("read", help="Extraire un fichier vers un fichier local.")
     r.add_argument("disk")
     r.add_argument("name", help="Nom du fichier sur la disquette.")
     r.add_argument("--out", required=True, help="Fichier de sortie local.")
+    r.add_argument("--source", choices=["filer", "amsdos"],
+                   help="Couche à lire (par défaut: AMSDOS si présent, "
+                        "sinon Filer).")
     r.set_defaults(func=cmd_read)
 
     w = sub.add_parser("write", help="Copier un fichier local sur la disquette.")
     w.add_argument("disk")
     w.add_argument("name", help="Nom du fichier sur la disquette (8.3).")
     w.add_argument("local", help="Fichier local à copier.")
+    w.add_argument("--fs", choices=["both", "filer", "amsdos"], default="both",
+                   help="both (défaut) = répertoire Filer + objet AMSDOS ; "
+                        "filer = DOS/Gotek seul ; amsdos = émulateurs seuls.")
     w.add_argument("--type", choices=["basic", "binary"], default="binary")
     w.add_argument("--load", type=lambda s: int(s, 0), default=0x4000,
-                   help="Adresse de chargement (décimal ou 0xhex).")
+                   help="Adresse de chargement (décimal ou 0xhex) — objet "
+                        "AMSDOS uniquement.")
     w.set_defaults(func=cmd_write)
+
+    d = sub.add_parser("delete", help="Supprimer un fichier de la disquette.")
+    d.add_argument("disk")
+    d.add_argument("name", help="Nom du fichier à supprimer.")
+    d.set_defaults(func=cmd_delete)
 
     h = sub.add_parser("hex", help="Hexdump d'un secteur.")
     h.add_argument("disk")

@@ -10,12 +10,14 @@ L'API publique est exposée ici pour un usage concis::
 
 from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import (
+    CpcDirEntry,
     CpcError,
     CpcFile,
     CpcFilesystem,
     FT_BASIC,
     FT_BINARY,
     FT_PROTECTED,
+    FT_UNKNOWN,
 )
 from cpc_dsk.core.geometry import (
     DEFAULT_SECTOR_SIZE,
@@ -29,10 +31,12 @@ __all__ = [
     "ADFError",
     "CpcFilesystem",
     "CpcFile",
+    "CpcDirEntry",
     "CpcError",
     "FT_BASIC",
     "FT_BINARY",
     "FT_PROTECTED",
+    "FT_UNKNOWN",
     "DEFAULT_TRACKS",
     "DEFAULT_SIDES",
     "DEFAULT_SECTORS",
