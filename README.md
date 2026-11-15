@@ -1,239 +1,177 @@
-# Amstrad CPC — Éditeur de disquettes `.dsk` & images Gotek
-
-Outil **Python** pour créer et éditer :
-
-- des **disquettes virtuelles `.dsk`** au format **EXTENDED CPC DSK** (format
-  standard des images CPC, lu par les émulateurs Fuse / CPCJS / CERMU et le
-  Gotek),
-- des **images de clé USB** pour **Gotek** (lecteur floppy USB) sur Amstrad
-  CPC 6128.
-
-Le format est **vérifié sur des disquettes réelles** (jeux CPC téléchargés sur
-l'Internet Archive).
-
-## Structure du projet
+<div align="center">
 
 ```
-AmstradCPC/
-├── cpc_dsk/
-│   ├── core/          # Noyau sans dépendance GUI
-│   │   ├── adf.py     #   Conteneur EXTENDED CPC DSK (Disk-Info + blocs piste)
-│   │   ├── cpcfs.py   #   Système de fichiers : répertoire Filer + AMSDOS
-│   │   ├── geometry.py#   Géométrie par défaut (création de disquette vierge)
-│   │   └── gotek.py   #   Préparation de l'image USB pour Gotek
-│   ├── cli.py         # Interface en ligne de commande
-│   └── gui.py         # Interface graphique (tkinter)
-├── test_disks/        # Disquettes de test (3 réelles d'époque + 2 générées)
-├── tests/
-├── pyproject.toml
-└── README.md
+ ██████╗██████╗  ██████╗    ██████╗ ██╗███████╗██╗  ██╗
+██╔════╝██╔══██╗██╔════╝    ██╔══██╗██║██╔════╝██║ ██╔╝
+██║     ██████╔╝██║         ██║  ██║██║███████╗█████╔╝
+██║     ██╔═══╝ ██║         ██║  ██║██║╚════██║██║═██╗
+╚██████╗██║     ╚██████╗    ██████╔╝██║███████║██║  ██╗
+ ╚═════╝╚═╝      ╚═════╝    ╚═════╝ ╚═╝╚══════╝╚═╝  ╚═╝
+        D I S K   E D I T O R   .DSK  ·  G O T E K  ·  A M S D O S
+
+Ready
+█
 ```
 
-## Format géré
+**CPC `.dsk` disk image editor, with USB key preparation for Gotek readers.**
+A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 
-**Conteneur « EXTENDED CPC DSK »** (vérifié) :
+![Python](https://img.shields.io/badge/Python-3.8%2B-000080?style=flat-square&labelColor=FFFF00&logo=python&logoColor=000080)
+![GUI](https://img.shields.io/badge/GUI-tkinter-000080?style=flat-square&labelColor=00FFFF)
+![Dependencies](https://img.shields.io/badge/dependencies-none-000080?style=flat-square&labelColor=00FF00)
+![License](https://img.shields.io/badge/license-MIT-000080?style=flat-square&labelColor=FF8000)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-000080?style=flat-square&labelColor=FFDD00&logo=buymeacoffee&logoColor=000000)](https://www.buymeacoffee.com/ChristopheCruz)
 
-- **Disk-Info** (256 o) : magic `EXTENDED CPC DSK File…`, nb de pistes `0x30`,
-  nb de faces `0x31`, tableau des tailles de piste `0x34` (1 o/piste × 256).
-- **Blocs piste** : en-tête `Track-Info` (256 o : taille de secteur `0x14`,
-  nb de secteurs `0x15`, gap3 `0x16`, filler `0x17`, puis un enregistrement
-  de 8 o par secteur — cylindre, face, ID, code taille, st1, st2, longueur
-  LE16) + données de secteurs contiguës. WinAPE valide ces enregistrements
-  à l'ouverture (« invalid track sizes » sinon) ; les disques générés par
-  l'outil les reproduisent fidèlement et remplissent les secteurs vierges à
-  `0xE5`, comme après un formatage réel.
-- Géométrie type : 40 pistes × 1 face, bloc de 4864 o (9 secteurs × **512 o**)
-  → fichier de 194 816 o, identique à une disquette CPC réelle.
-- **Variantes SAM / WinAPE tolérées** (vérifiées sur `test_disks/abbey.dsk`) :
-  tableau des pistes complété à zéro (premier zéro = fin des pistes réelles),
-  traînée `Offset-Info` en fin de fichier (conservée à la sauvegarde),
-  taille de secteur variable par piste (ex. 15 × 256 o).
+[🇬🇧 English](README.md) · [🇫🇷 Français](README.fr.md)
 
-### Répertoires et fichiers
+</div>
 
-Deux couches coexistent sur une disquette CPC (vérifié sur images réelles) :
+---
 
-1. **Le répertoire Filer** (DOS d'origine du CPC) — c'est lui que lit le vrai
-   DOS, et donc le **Gotek sur matériel réel**.
+![CPC Disk Editor — Diskette tab](docs/screenshot.png)
 
-   Piste 0, secteur 0 : 16 entrées de 32 o. Entrée occupée :
+## Table of Contents
 
-   | Offset | Taille | Champ |
-   |--------|--------|-------|
-   | 0x00   | 1  | 0x00 |
-   | 0x01   | 11 | nom 8.3, `.` codé 0xC9 |
-   | 0x0C   | 1  | index du chunk dans le fichier (0, 1, …) |
-   | 0x0D   | 2  | 0x00 0x00 |
-   | 0x0F   | 1  | taille du chunk en unités de 128 o (max 0x80 = 16 Ko) |
-   | 0x10   | 16 | `ceil(chunk/1024)` octets de compteur d'allocation (compteur global démarrant à 0x02), puis zéros |
+- [Features](#features)
+- [Installation](#installation)
+- [Running](#running)
+- [Usage](#usage)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Project structure](#project-structure)
+- [Supporting the project](#supporting-the-project)
+- [Credits](#credits)
+- [License](#license)
 
-   Entrée vide = 32 o 0xE5. Les données des fichiers sont empilées
-   séquentiellement dans l'ordre du répertoire, à partir du secteur 1 de la
-   piste 0 ; un fichier > 16 Ko occupe plusieurs entrées (chunks). Le Filer
-   recolle le paquet à l'insertion/suppression. Fichier Filer = données
-   brutes, longueur réelle arrondie au multiple de 128 o.
+## Features
 
-2. **Les en-têtes AMSDOS** (DOS tiers « Amsdos ») : chaque fichier est
-   préfixé d'un en-tête de 128 o (nom, type, adresses de chargement/entrée,
-   longueur, checksum) localisé par balayage — c'est la méthode de l'émulateur
-   CERMU, qui ne lit pas le répertoire Filer.
+### Diskette tab (`.dsk`)
 
-   Les objets AMSDOS vivent dans le **flux physique** du disque : un fichier
-   traverse les pistes et les en-têtes `Track-Info` du conteneur restent
-   intacts entre ses octets (vérifié sur `greed.dsk` : `YOGI1 BIN`, 25 192 o,
-   traverse 5 pistes). Le balayage, la lecture, l'écriture et la suppression
-   se font donc toutes dans ce flux linéaire, jamais dans l'image brute.
+- **Open, create, and save** disk images in the EXTENDED CPC DSK format (`.adf` files are also accepted).
+- **File catalogue** across both layers, **Filer** and **AMSDOS**: name, type, length and load address.
+- **Add a local file** onto the diskette: 8.3 name, type (Basic or binary), load address, and choice of write layer (Filer, AMSDOS or both).
+- **Extract** a file to the local disk, keeping its extension (`MONPROG BAS` → `monprog.bas`).
+- **Delete** a file, with confirmation.
+- **Hex dump** of a file or a sector, in three aligned columns: offset, bytes, ASCII.
+- **Clickable sector map**: the geometry is read from the image, free sectors (filled with `E5` or `00`) are distinguished from in-use sectors, and those belonging to the selected file are highlighted.
+
+### Gotek tab (USB key)
+
+- **Source list** of `.dsk` / `.adf` images, reorderable with ▲ ▼.
+- **Naming pattern** (default `DISK%03d.adf`), subfolder and start index, with a live preview of the resulting names.
+- **Generate** the directory to copy onto the Gotek's USB key.
+- **Verify** an existing directory.
+- **Create a full FAT16 image** of the key (32 MB) with a built-in FAT writer, no external tool needed.
+- **Load an existing `.img` image**: list its content, send its diskettes back to the source stack, or extract everything to a folder.
+
+### Interface
+
+- **Amstrad CPC** look: firmware palette (blue, bright yellow, cyan), pixel fonts, 4-px relief buttons, reverse-video selection and a blinking `Ready` cursor.
+- **Two monitors**: colour (CTM644) or green (GT65), toggled with F3.
+- **Three interface languages**: English, French and Spanish — detected from the system locale, switchable in the window.
+- **Drag & drop** from the Windows Explorer.
+- **Hi-DPI friendly**: pixel fonts stay crisp at 125 %, 150 % and beyond.
 
 ## Installation
 
+Python 3.8 or newer is all you need. `tkinter` ships with Python on Windows and macOS.
+
 ```bash
-pip install -e .
+git clone https://github.com/ChristopheCruz/AmstradCPC.git
+cd AmstradCPC
 ```
 
-Sans installation : `python -m cpc_dsk.cli …` et `python -m cpc_dsk.gui`.
+On Linux, `tkinter` is sometimes a separate package:
 
-## Utilisation (GUI)
+```bash
+sudo apt install python3-tk      # Debian / Ubuntu
+```
+
+The **Press Start 2P** and **VT323** fonts are included in `cpc_dsk/fonts/`. On Windows they are loaded for the application only — nothing is installed on the system. Elsewhere, or if the folder is missing, the interface automatically falls back to a monospace font. For the pixel look on Linux or macOS, install the two `.ttf` files in your user fonts.
+
+## Running
 
 ```bash
 python -m cpc_dsk.gui
 ```
 
-Deux onglets :
+## Usage
 
-- **Disquette (.dsk)** : ouvrir / créer / sauvegarder, liste des fichiers
-  avec leur couche (`FILER` / `AMSDOS`), ajout d'un fichier local (nom 8.3
-  **préserver l'extension**, type, adresse de chargement, couche `filer`
-  par défaut / `both` / `amsdos`), extraction (le nom proposé retrouve son
-  extension), suppression, hexdumper de fichier ou de secteur brut.
-- **Gotek (clé USB)** : pile de sources `.dsk`/`.adf`, options de nommage
-  (`DISK%03d.adf`, sous-dossier, index de départ), génération du répertoire à
-  copier sur la clé, vérification des images, et création d'une image
-  **FAT16 complète** (rédacteur intégré, aucune dépendance — compatible
-  `mkfs.fat` 4.2, vérifiée avec `fsck.fat` et `blkid`).
+### Editing a diskette
 
-**Glisser-déposer (Windows)** : depuis l'explorateur, déposer directement
-sur la fenêtre — `.dsk`/`.adf` s'ouvrent (ou rejoignent les sources Gotek
-selon l'onglet actif), les autres fichiers s'ajoutent à la disquette ouverte
-(dialogue 8.3). Implémenté avec l'API `RegisterDragHook` (aucune
-dépendance externe) ; inactif sous Linux/macOS.
+1. **Open** a `.dsk` image, or start from a blank one with **New**.
+2. Select a file in the catalogue: its content is shown as hex on the right.
+3. **Add**, **Extract** or **Delete** files. The diskette is saved after every change.
+4. To inspect a specific sector, type `track sector` (e.g. `0 0`) then **Show**, or click directly in the sector map (**Sectors** view, F4).
 
-## Exécutable autonome (PyInstaller)
+### Preparing a key for the Gotek
 
-L'application peut être livrée sans Python ni installation :
+1. In the **Gotek** tab (F2), **Add** your diskettes, then put them in the desired order with ▲ ▼.
+2. Adjust the naming pattern, subfolder and start index if needed. The "→ USB key" column shows the name each image will get.
+3. Choose the output directory (the root of the key, for example), then **Generate USB**.
+4. For a blank key, **FAT image** instead produces a complete `.img` to write onto the key.
 
-- **Windows (natif)** : depuis un PC Windows (Python 3.10+ requis pour la
-  seule génération), lancer `build_exe.bat` → produit `dist\cpc-dsk-gui.exe`.
-- **Windows (croix-compilation depuis WSL, testée)** : avec `wine` installé,
-  utiliser un CPython 64-bit portable « python-build-standalone » (pas
-  d'installateur requis, tkinter inclus) et y installer `pyinstaller`, puis :
-  ```bash
-  wine /chemin/cpython/python.exe -m pip install pyinstaller
-  # depuis la racine du projet, copié sur un chemin Linux NATIF (hors /mnt/c)
-  wine /chemin/cpython/python.exe -m PyInstaller --onefile --windowed --clean --name cpc-dsk-gui run_gui.py
-  ```
-  → produit `dist/cpc-dsk-gui.exe` (PE32+ x86-64). Le montage WSL `/mnt/c`
-  fait échouer l'étape « BeginUpdateResource » de PyInstaller sous wine.
-- **Linux / WSL** :
-  ```bash
-  python3 -m pip install pyinstaller
-  python3 -m PyInstaller --onefile --windowed --name cpc-dsk-gui run_gui.py
-  ```
-  → produit `dist/cpc-dsk-gui`.
+![CPC Disk Editor — Gotek tab](docs/screenshot-gotek.png)
 
-L'exécutable embarque Python + tkinter : il s'ouvre directement sur la
-machine cible (testé sous WSL).
+### Drag & drop (Windows)
 
-## Disquettes de test
+| What you drop | Active tab | Result |
+|---|---|---|
+| `.dsk` / `.adf` | Diskette, no disk open | the diskette is opened |
+| `.dsk` / `.adf` | Diskette, a disk open | added to the Gotek sources |
+| `.dsk` / `.adf` | Gotek | added to the sources |
+| any other file | either | added to the open diskette |
 
-Le dossier `test_disks/` contient 5 disquettes prêtes à l'emploi
-(3 réelles d'époque + 2 générées par l'outil) : `greed.dsk`, `robot.dsk`,
-`abbey.dsk`, `vierge.dsk`, `demo_edition.dsk`. Voir
-[`test_disks/README.md`](test_disks/README.md) pour le contenu de chacune et
-un scénario de test complet (listage, extraction, suppression, protection
-des disques ambigus, onglet Gotek).
+## Keyboard shortcuts
 
-## Utilisation (CLI)
+| Key | Action |
+|---|---|
+| <kbd>F1</kbd> / <kbd>F2</kbd> | Diskette / Gotek tab |
+| <kbd>F3</kbd> | Colour / green monitor |
+| <kbd>F4</kbd> | Files / Sectors view |
+| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open a diskette |
+| <kbd>Ctrl</kbd>+<kbd>N</kbd> | New diskette |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save |
+| <kbd>Del</kbd> | Delete the selected file or source |
+| <kbd>Enter</kbd> (sector field) | Show the sector |
 
-```bash
-# Créer une disquette vierge
-cpc-dsk new monjeu.dsk
+## Project structure
 
-# Géométrie + liste des fichiers (Filer + AMSDOS)
-cpc-dsk info monjeu.dsk
-cpc-dsk list monjeu.dsk [--source filer|amsdos]
-
-# Extraire un fichier de la disquette vers un fichier local
-cpc-dsk read monjeu.dsk "MONPROG BAS" --out monprog.bas [--source filer|amsdos]
-
-# Copier un fichier local sur la disquette
-cpc-dsk write monjeu.dsk "MONPROG BAS" monprog.bas --type basic --load 0x4000 [--fs both|filer|amsdos]
-
-# Supprimer un fichier
-cpc-dsk delete monjeu.dsk "MONPROG BAS"
-
-# Accès bas niveau (secteurs bruts)
-cpc-dsk hex monjeu.dsk 0 0
-cpc-dsk sector monjeu.dsk 0 0 --write-file brut.bin
+```
+cpc_dsk/
+├── gui.py            tkinter GUI (pixel-art skin)
+├── cli.py            command-line interface
+├── i18n.py           interface strings (en / fr / es)
+├── fonts/            Press Start 2P and VT323 (OFL license)
+└── core/
+    ├── adf.py        disk image reader / writer
+    ├── cpcfs.py      Filer and AMSDOS filesystems
+    └── gotek.py      USB key preparation and FAT16 writer
 ```
 
-**Modes d'écriture** (`--fs`) :
+## Supporting the project
 
-- `both` (défaut) : écrit les **deux** couches — fichier Filer (données
-  brutes + entrées du répertoire) **et** objet AMSDOS (en-tête + données). Le
-  disque est lisible par le vrai DOS/Gotek *et* les émulateurs.
-- `filer` : répertoire Filer seulement (DOS/Gotek, pas d'émulateurs basés sur
-  le balayage AMSDOS).
-- `amsdos` : objet AMSDOS seulement (émulateurs).
+CPC Disk Editor is free and will stay free. If it saved you a few hours of diskette fiddling, or brought an old 6128 back to life through a Gotek, you can buy me a coffee: it funds time for the next features.
 
-Allocation : les fichiers Filer grandissent vers l'avant depuis le secteur
-répertoire (contrainte du format) ; les objets AMSDOS sont empilés vers
-l'arrière depuis la fin du disque. Les disques réels d'époque dont le paquet
-Filer contient des objets AMSDOS (agencement ambigu) sont protégés : la
-lecture fonctionne, l'écriture Filer est refusée.
+<div align="center">
 
-## Clé USB Gotek
+<a href="https://www.buymeacoffee.com/ChristopheCruz" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="50">
+</a>
 
-La clé USB du Gotek est un répertoire FAT16/FAT32 contenant des fichiers
-`.dsk`/`.adf`, servis un à un par le firmware Gotek comme des disquettes
-virtuelles.
-
-```bash
-# (via le noyau) préparer le répertoire à copier sur la clé
-from cpc_dsk.core.gotek import GotekConfig, prepare_usb_directory
-prepare_usb_directory("cle_usb/", ["jeu1.dsk", "jeu2.dsk"], GotekConfig())
+```
+10 PRINT "THANKS !"
+20 GOTO 10
 ```
 
-Voir `cpc_dsk/core/gotek.py` : validation des sources, préfixage
-`DISK%03d.adf…`, sous-dossier, index de départ, vérification du résultat et
-création d'une image FAT16 complète (32 Mo par défaut, fichiers à la racine)
-par le **rédacteur intégré** : son secteur d'amorçage reproduit byte-par-byte
-la disposition « compacte » de `mkfs.fat` 4.2 (celle qu'attendent fsck.fat et
-libblkid — pas la variante « extended BPB » du manuel Microsoft).
+</div>
 
-## Validation du format
+A star ⭐ on the repository, a bug report or an idea in the *issues* helps just as much.
 
-- Le conteneur, le répertoire Filer, les fichiers AMSDOS et l'image FAT16
-  Gotek sont **testés** (`pytest`, 40 tests) et **vérifiés sur des
-  disquettes réelles** :
-  - `greed.dsk` (*Yogi Bear*) : 4 fichiers Filer (768 / 25344 / 40960 / 7680 o)
-    + 4 objets AMSDOS,
-  - `robot.dsk` (*Robot PD 14400*) : 10 fichiers Filer en 12 entrées
-    (chunks de 16 Ko, compteur d'allocation 0x02..0x81) + 2 objets AMSDOS,
-  - `abbey.dsk` : disque de boot SAM/WinAPE — variante du conteneur
-    (39/42 pistes, secteurs 256 o, traînée `Offset-Info`).
-- Un aller-retour **écriture → relecture** est vérifié (modes `filer` et
-  `both`), ainsi que la suppression avec recollage du paquet.
+## Credits
 
-## Limites connues
+- **Press Start 2P** by CodeMan38 and **VT323** by Peter Hull, released under the [SIL Open Font License 1.1](https://openfontlicense.org). Their licenses are in `cpc_dsk/fonts/`.
+- Amstrad and CPC are trademarks of their respective owners. This project is not affiliated with any of them.
 
-- La longueur exacte d'un fichier Filer n'est pas stockée dans le répertoire
-  (unités de 128 o) : la lecture `--source filer` renvoie la région allouée
-  complète (remplissage à zéro inclus), comme la charge réelle du Filer.
-- L'image FAT16 (rédacteur intégré) est plafonnée à ~32 Mo avec cette
-  géométrie (512 o/secteur, 1 secteur/cluster) : de quoi couvrir les clés
-  Gotek classiques. Pour une clé plus grande, copier le répertoire généré
-  sur une clé formatée FAT16/FAT32.
+## License
 
-## Licence
-
-MIT
+[MIT](LICENSE) — see the `LICENSE` file at the root of the repository.

@@ -48,6 +48,8 @@ from cpc_dsk.core.gotek import (
     prepare_usb_directory,
     verify_usb_directory,
 )
+from cpc_dsk.i18n import LANGUAGES, detect_language, set_language as _set_lang
+from cpc_dsk.i18n import t as L
 
 
 # ====================================================================== #
@@ -107,10 +109,10 @@ PIXEL_BODY = "VT323"
 # ====================================================================== #
 def _fmt_size(n: int) -> str:
     if n >= 1024 * 1024:
-        return f"{n / (1024 * 1024):.1f} Mo"
+        return f"{n / (1024 * 1024):.1f} {t('sz_mb')}"
     if n >= 1024:
-        return f"{n / 1024:.1f} Ko"
-    return f"{n} o"
+        return f"{n / 1024:.1f} {t('sz_kb')}"
+    return f"{n} {t('sz_b')}"
 
 
 def _suggest_83(path: str) -> str:
@@ -473,12 +475,12 @@ class AddFileDialog:
         self.app = app
         self.result: Optional[dict] = None
         self.win = win = tk.Toplevel(app.root)
-        win.title("Ajouter un fichier sur la disquette")
+        win.title(L("dlg_addwin_title"))
         win.configure(bg=t.acc)
         win.transient(app.root)
         win.resizable(False, False)
 
-        tk.Label(win, text="AJOUTER UN FICHIER", bg=t.acc, fg=t.paper,
+        tk.Label(win, text=L("dlg_addwin_head"), bg=t.acc, fg=t.paper,
                  font=app.f_head, anchor="w", padx=12, pady=10).pack(
             fill="x", padx=4, pady=(4, 0))
         frm = tk.Frame(win, bg=t.panel, padx=18, pady=16)
@@ -496,25 +498,27 @@ class AddFileDialog:
                      anchor="w").grid(row=row, column=0, sticky="w",
                                       pady=6, padx=(0, 14))
 
-        label("Nom sur la disquette (8.3)", 0)
+        label(L("add_name"), 0)
         name_entry = app.entry(frm, self.name, width=14)
         name_entry.grid(row=0, column=1, sticky="w", pady=6)
-        label("Type", 1)
+        label(L("add_type"), 1)
         Segmented(frm, app, self.ftype,
-                  [("basic", "Basic"), ("binary", "Binaire")]).grid(
+                  [("basic", L("type_basic")),
+                   ("binary", L("type_binary"))]).grid(
             row=1, column=1, sticky="w", pady=6)
-        label("Adresse de chargement", 2)
+        label(L("add_load"), 2)
         app.entry(frm, self.load, width=10).grid(row=2, column=1, sticky="w",
                                                  pady=6)
-        label("Couche(s) d'écriture", 3)
+        label(L("add_layer"), 3)
         Segmented(frm, app, self.fs,
-                  [("filer", "Filer"), ("both", "Les deux"),
-                   ("amsdos", "AMSDOS")]).grid(row=3, column=1, sticky="w",
-                                               pady=6)
+                  [("filer", L("layer_filer")),
+                   ("both", L("layer_both")),
+                   ("amsdos", L("layer_amsdos"))]).grid(
+            row=3, column=1, sticky="w", pady=6)
 
         btns = tk.Frame(frm, bg=t.panel)
         btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(16, 0))
-        PixelButton(btns, app, "Annuler", command=win.destroy).pack(
+        PixelButton(btns, app, L("btn_cancel"), command=win.destroy).pack(
             side="left", padx=(0, 8))
         PixelButton(btns, app, "OK", kind="primary", command=self._ok).pack(
             side="left")
@@ -530,8 +534,7 @@ class AddFileDialog:
         try:
             load = int(self.load.get(), 0)
         except ValueError:
-            self.app.error("Adresse invalide",
-                           "Adresse de chargement invalide (ex: 0x4000).")
+            self.app.error(L("err_addr"), L("err_addr_msg"))
             return
         self.result = {
             "name": self.name.get(),
@@ -548,7 +551,11 @@ class AddFileDialog:
 class DskEditorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("CPC Disk Editor — Disquettes .dsk & Gotek")
+        # Langue d'interface : locale système (en / fr / es), changeable
+        # dans l'en-tête (reconstruit l'interface).
+        self._lang = detect_language()
+        _set_lang(self._lang)
+        self.root.title(L("win_title"))
         self.scale = max(1.0, root.winfo_fpixels("1i") / 96)  # 1.25 à 125 %
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         w = min(round(1440 * self.scale), sw - 60)
@@ -572,7 +579,7 @@ class DskEditorApp:
         self._last_hex: Optional[Tuple[bytes, str]] = None
         self._gtk_last: List[Tuple[str, str]] = []
         self._gtk_progress = 0.0
-        self._status_text = "Prêt."
+        self._status_text = L("st_ready")
         self._tab = 0
         self._theme_name = "couleur"
         self._blink_id: Optional[str] = None
@@ -580,6 +587,9 @@ class DskEditorApp:
         self.sector_var = tk.StringVar(value="0 0")
         self.left_view = tk.StringVar(value="files")  # "files" | "map"
         self.left_view.trace_add("write", lambda *a: self._show_left_view())
+        self.lang_var = tk.StringVar(value=self._lang)
+        self.lang_var.trace_add(
+            "write", lambda *a: self.set_language(self.lang_var.get()))
         self.gtk_pattern = tk.StringVar(value=DEFAULT_NAME_PATTERN)
         self.gtk_subfolder = tk.StringVar(value="")
         self.gtk_index = tk.StringVar(value="1")
@@ -601,12 +611,9 @@ class DskEditorApp:
 
         # Glisser-déposer depuis l'explorateur Windows.
         if _register_drag_drop(root, self._on_drop):
-            self._set_status(
-                "Prêt. Glissez des fichiers sur la fenêtre : .dsk/.adf "
-                "s'ouvrent (ou alimentent l'onglet Gotek), les autres "
-                "s'ajoutent à la disquette ouverte.")
+            self._set_status(L("st_dnd_on"))
         elif sys.platform == "win32":
-            self._set_status("Prêt. (glisser-déposer non actif)")
+            self._set_status(L("st_dnd_off"))
 
     # ------------------------------------------------------------------ #
     # Thème, polices, styles ttk
@@ -697,6 +704,26 @@ class DskEditorApp:
         self._gotek_refresh_tree()
         self._gotek_result_render()
 
+    def set_language(self, lang: str) -> None:
+        """Change la langue d'interface (en / fr / es) et reconstruit
+        l'interface ; l'état (disque ouvert, sources, thème, onglet) survit."""
+        if lang not in LANGUAGES or lang == self._lang:
+            return
+        self._lang = lang
+        _set_lang(lang)
+        if self._blink_id:
+            self.root.after_cancel(self._blink_id)
+            self._blink_id = None
+        self.root.title(L("win_title"))
+        self._status_text = L("st_ready")
+        self.shell.destroy()
+        self._build_ui()
+        self._refresh(rescan=False)
+        if self._last_hex:
+            self._show_hex(*self._last_hex)
+        self._gotek_refresh_tree()
+        self._gotek_result_render()
+
     # ------------------------------------------------------------------ #
     # Construction de l'interface
     # ------------------------------------------------------------------ #
@@ -728,14 +755,17 @@ class DskEditorApp:
         left = tk.Frame(head, bg=t.paper)
         left.pack(side="left")
         self._label(left, "CPC DISK EDITOR", font=self.f_title).pack(anchor="w")
-        self._label(left, "Éditeur de disquettes .DSK & Gotek · AMSDOS / CP/M",
-                    fg=t.acc).pack(anchor="w", pady=(8, 0))
+        self._label(left, L("hdr_sub"), fg=t.acc).pack(anchor="w", pady=(8, 0))
         right = tk.Frame(head, bg=t.paper)
         right.pack(side="right", anchor="s")
         PixelButton(right, self,
-                    "Moniteur : " + ("vert" if self._theme_name == "vert"
-                                     else "couleur"),
+                    L("btn_monitor",
+                      v=L("mon_vert" if self._theme_name == "vert"
+                          else "mon_couleur")),
                     command=self.toggle_monitor).pack(side="right")
+        Segmented(right, self, self.lang_var,
+                  [("en", "EN"), ("fr", "FR"), ("es", "ES")]).pack(
+            side="right", padx=(0, 18))
         stripes = tk.Frame(right, bg=t.paper)
         stripes.pack(side="right", padx=(0, 18))
         for c in (t.r, t.g, t.b):
@@ -745,7 +775,7 @@ class DskEditorApp:
         tabs = tk.Frame(screen, bg=t.paper)
         tabs.pack(fill="x", pady=(14, 0))
         self._tab_labels: List[tk.Label] = []
-        for i, text in enumerate(("F1 DISQUETTE .DSK", "F2 GOTEK USB")):
+        for i, text in enumerate((L("tab_disk"), L("tab_gotek"))):
             lbl = tk.Label(tabs, text=text, font=self.f_head, padx=18,
                            pady=12, cursor="hand2")
             lbl.pack(side="left", padx=(0, 8))
@@ -816,28 +846,28 @@ class DskEditorApp:
 
         bar = tk.Frame(tab, bg=t.paper)
         bar.pack(side="top", fill="x")
-        for text, icon, cmd in (("Ouvrir…", "open", self.open_disk),
-                                ("Nouveau", "new", self.new_disk),
-                                ("Sauver", "save", self.save_disk),
-                                ("Enreg. sous…", None, self.save_disk_as)):
+        for text, icon, cmd in ((L("btn_open"), "open", self.open_disk),
+                                (L("btn_new"), "new", self.new_disk),
+                                (L("btn_save"), "save", self.save_disk),
+                                (L("btn_saveas"), None, self.save_disk_as)):
             PixelButton(bar, self, text, command=cmd, icon=icon).pack(
                 side="left", padx=(0, 10))
         tk.Frame(bar, bg=t.dim, width=4, height=36).pack(side="left",
                                                          padx=(4, 14))
-        self._label(bar, "PISTE SECT", fg=t.acc, font=self.f_head).pack(
-            side="left", padx=(0, 10))
+        self._label(bar, L("lbl_track_sect"), fg=t.acc,
+                    font=self.f_head).pack(side="left", padx=(0, 10))
         sect = self.entry(bar, self.sector_var, width=6)
         sect.pack(side="left", padx=(0, 10))
         sect.bind("<Return>", lambda e: self.show_sector())
-        PixelButton(bar, self, "Afficher", kind="primary", icon="eye",
+        PixelButton(bar, self, L("btn_show"), kind="primary", icon="eye",
                     command=self.show_sector).pack(side="left")
 
         info = tk.Frame(tab, bg=t.panel, padx=12, pady=6)
         info.pack(side="top", fill="x", pady=(12, 12))
-        self.file_label = self._label(info, "A: (aucun disque)", fg=t.hi,
+        self.file_label = self._label(info, L("lbl_no_disk"), fg=t.hi,
                                       anchor="w")
         self.file_label.pack(side="left")
-        self.info = self._label(info, "Géométrie : —", fg=t.acc, anchor="w")
+        self.info = self._label(info, L("lbl_geometry"), fg=t.acc, anchor="w")
         self.info.pack(side="left", padx=(24, 0), fill="x", expand=True)
 
         pane = tk.PanedWindow(tab, orient="horizontal", bg=t.paper,
@@ -849,14 +879,15 @@ class DskEditorApp:
         leftcol = tk.Frame(pane, bg=t.paper)
         vbar = tk.Frame(leftcol, bg=t.paper)
         vbar.pack(side="top", fill="x", pady=(0, 10))
-        self._label(vbar, "VUE", fg=t.acc, font=self.f_head).pack(
+        self._label(vbar, L("lbl_view"), fg=t.acc, font=self.f_head).pack(
             side="left", padx=(0, 10))
         Segmented(vbar, self, self.left_view,
-                  [("files", "Fichiers"), ("map", "Secteurs")]).pack(side="left")
+                  [("files", L("view_files")),
+                   ("map", L("view_map"))]).pack(side="left")
         self._label(vbar, "F4", fg=t.acc, font=self.f_small).pack(
             side="left", padx=(4, 0))
-        mp = Panel(leftcol, self, "Carte des secteurs")
-        files = Panel(leftcol, self, "Cat · Filer + AMSDOS")
+        mp = Panel(leftcol, self, L("panel_map"))
+        files = Panel(leftcol, self, L("panel_cat0"))
         self.files_panel, self.map_panel = files, mp
         actions = tk.Frame(files.body, bg=t.panel, padx=10, pady=10)
         actions.pack(side="bottom", fill="x")
@@ -867,10 +898,10 @@ class DskEditorApp:
         self.tree = ttk.Treeview(tv_frame, columns=cols, show="headings",
                                  selectmode="browse", style="Pixel.Treeview",
                                  height=5)
-        for col, text, w, anchor in (("name", "NOM", 130, "w"),
-                                     ("source", "COUCHE", 80, "w"),
-                                     ("type", "TYPE", 60, "w"),
-                                     ("length", "LONG.", 70, "e"),
+        for col, text, w, anchor in (("name", L("col_name"), 130, "w"),
+                                     ("source", L("col_layer"), 80, "w"),
+                                     ("type", L("col_type"), 60, "w"),
+                                     ("length", L("col_len"), 70, "e"),
                                      ("offset", "@", 80, "e")):
             self.tree.heading(col, text=text, anchor=anchor)
             self.tree.column(col, width=w, anchor=anchor, stretch=True)
@@ -883,12 +914,14 @@ class DskEditorApp:
         self.tree.bind("<<TreeviewSelect>>", self._on_file_select)
         self.tree.bind("<Delete>", lambda e: self.delete_file())
 
-        PixelButton(actions, self, "Ajouter", icon="new", padx=12,
+        PixelButton(actions, self, L("btn_add"), icon="new", padx=12,
                     command=self.add_file).pack(side="left")
-        PixelButton(actions, self, "Extraire", icon="extract", padx=12,
-                    command=self.extract_file).pack(side="left", padx=8)
-        PixelButton(actions, self, "Supprimer", kind="danger", icon="trash",
-                    padx=12, command=self.delete_file).pack(side="right")
+        PixelButton(actions, self, L("btn_extract"), icon="extract",
+                    padx=12, command=self.extract_file).pack(side="left",
+                                                             padx=8)
+        PixelButton(actions, self, L("btn_delete"), kind="danger",
+                    icon="trash", padx=12,
+                    command=self.delete_file).pack(side="right")
 
         self.map_title = mp.head
         self.map_canvas = tk.Canvas(mp.body, bg=t.panel, height=170,
@@ -900,8 +933,10 @@ class DskEditorApp:
         self.map_canvas.bind("<Motion>", self._on_map_motion)
         legend = tk.Frame(mp.body, bg=t.panel, padx=10, pady=8)
         legend.pack(fill="x")
-        for color, text in ((t.warm, "Occupé"), (t.ink, "Fichier sélectionné"),
-                            (t.dim, "Libre"), (t.hi, "Curseur")):
+        for color, text in ((t.warm, L("map_used")),
+                            (t.ink, L("map_file")),
+                            (t.dim, L("map_free")),
+                            (t.hi, L("map_cursor"))):
             tk.Frame(legend, bg=color, width=14, height=14).pack(side="left")
             self._label(legend, text, fg=t.hi, font=self.f_small).pack(
                 side="left", padx=(6, 16))
@@ -999,11 +1034,11 @@ class DskEditorApp:
         if lay is None:
             c.config(height=90)
             c.create_text(max(200, c.winfo_width()) / 2, 45,
-                          text="AUCUNE DISQUETTE", font=self.f_head, fill=t.acc)
-            self.map_title.config(text="CARTE DES SECTEURS")
+                          text=L("no_disk_map"), font=self.f_head, fill=t.acc)
+            self.map_title.config(text=L("map_title"))
             return
         lab, cell, gap, tracks, sectors = lay
-        self.map_title.config(text=f"CARTE DES SECTEURS · {tracks} × {sectors}")
+        self.map_title.config(text=L("map_title_n", t=tracks, s=sectors))
         height = sectors * (cell + gap) + 26
         if int(float(c.cget("height"))) != height:
             c.config(height=height)
@@ -1058,9 +1093,11 @@ class DskEditorApp:
         hit = self._map_hit(event)
         if hit:
             tr, se = hit
-            state = ("fichier sélectionné" if hit in self._file_secs else
-                     "occupé" if self._sec_used[tr][se] else "libre")
-            self.status.config(text=f"Piste {tr} · secteur {se} · {state}")
+            state = (L("map_file") if hit in self._file_secs else
+                     L("map_used") if self._sec_used[tr][se]
+                     else L("map_free"))
+            self.status.config(text=L("st_sector_hover",
+                                      t=tr, s=se, st=state))
         else:
             self.status.config(text=self._status_text)
 
@@ -1077,8 +1114,8 @@ class DskEditorApp:
                             f"&{f.offset:05X}"))
         n = len(self._files)
         self.files_panel.head.config(
-            text=f"CAT · {n} FICHIER{'S' if n > 1 else ''} · FILER + AMSDOS"
-            if self.disk is not None else "CAT · FILER + AMSDOS")
+            text=L("panel_cat_n", n=n, s="S" if n > 1 else "")
+            if self.disk is not None else L("panel_cat0"))
 
     def _selected_file(self) -> Optional[CpcFile]:
         sel = self.tree.selection()
@@ -1094,8 +1131,8 @@ class DskEditorApp:
             self._scan_disk()
             self._file_secs = set()
         if self.disk is None:
-            self.info.config(text="Géométrie : —")
-            self.file_label.config(text="A: (aucun disque)")
+            self.info.config(text=L("lbl_geometry"))
+            self.file_label.config(text=L("lbl_no_disk"))
         else:
             self.info.config(text=self.disk.summary())
             shown = self.path or "(nouveau)"
@@ -1110,8 +1147,8 @@ class DskEditorApp:
     # ------------------------------------------------------------------ #
     def open_disk(self) -> None:
         path = filedialog.askopenfilename(
-            title="Ouvrir une image .dsk",
-            filetypes=[("CPC DSK", "*.dsk *.adf"), ("Tous", "*.*")])
+            title=L("dlg_open_title"),
+            filetypes=[(L("ft_dsk"), "*.dsk *.adf"), (L("ft_all"), "*.*")])
         if not path:
             return
         self._open_path(path)
@@ -1120,7 +1157,7 @@ class DskEditorApp:
         try:
             self.disk = ADFDisk.load(path)
         except (OSError, ADFError) as exc:
-            self.error("Erreur d'ouverture", str(exc))
+            self.error(L("err_open"), str(exc))
             return
         self.path = path
         self._cursor = None
@@ -1128,12 +1165,11 @@ class DskEditorApp:
         self._clear_hex()
         self._refresh()
         self._show_tab(0)
-        self._set_status(f"Ouvert : {path}")
+        self._set_status(L("st_opened", p=path))
 
     def new_disk(self) -> None:
         if self.disk is not None and not self.ask(
-                "Nouvelle disquette",
-                "Abandonner les modifications non sauvegardées ?"):
+                L("dlg_new_title"), L("dlg_new_msg")):
             return
         self.disk = ADFDisk.new_blank()
         self.path = None
@@ -1141,13 +1177,13 @@ class DskEditorApp:
         self._last_hex = None
         self._clear_hex()
         self._refresh()
-        self._set_status("Nouvelle disquette vierge.")
+        self._set_status(L("st_new_disk"))
 
     def _save_to(self, path: str) -> bool:
         try:
             self.disk.save(path)
         except OSError as exc:
-            self.error("Erreur d'enregistrement", str(exc))
+            self.error(L("err_save"), str(exc))
             return False
         self.path = path
         self._refresh(rescan=False)
@@ -1155,34 +1191,34 @@ class DskEditorApp:
 
     def save_disk(self) -> None:
         if self.disk is None:
-            self.info_box("Sauver", "Aucune disquette à sauvegarder.")
+            self.info_box(L("dlg_save_title"), L("msg_no_disk"))
             return
         path = self.path or filedialog.asksaveasfilename(
-            title="Sauver sous…", defaultextension=".dsk",
-            filetypes=[("CPC DSK", "*.dsk")])
+            title=L("dlg_saveas_title"), defaultextension=".dsk",
+            filetypes=[(L("ft_dsk"), "*.dsk")])
         if path and self._save_to(path):
-            self._set_status(f"Sauvegardé : {path}")
+            self._set_status(L("st_saved", p=path))
 
     def save_disk_as(self) -> None:
         """« Enregistrer sous » : sauvegarde la disquette sur un nouveau
         chemin (devient le chemin courant — les « Sauver » suivants
         écrivent sur ce nouveau fichier)."""
         if self.disk is None:
-            self.info_box("Enregistrer sous", "Aucune disquette à sauvegarder.")
+            self.info_box(L("btn_saveas"), L("msg_no_disk"))
             return
         path = filedialog.asksaveasfilename(
-            title="Enregistrer la disquette sous…",
+            title=L("dlg_saveas_title2"),
             defaultextension=".dsk",
             initialfile=os.path.basename(self.path) if self.path else None,
-            filetypes=[("CPC DSK", "*.dsk")])
+            filetypes=[(L("ft_dsk"), "*.dsk")])
         if path and self._save_to(path):
-            self._set_status(f"Enregistré sous : {path}")
+            self._set_status(L("st_savedas", p=path))
 
     def _persist(self) -> None:
         """Sauvegarde sur le chemin courant (ou propose un chemin)."""
         if self.path is not None:
             if self._save_to(self.path):
-                self._set_status(f"Sauvegardé : {self.path}")
+                self._set_status(L("st_saved", p=self.path))
             return
         self.save_disk()
 
@@ -1202,7 +1238,7 @@ class DskEditorApp:
         tx.config(state="normal")
         tx.delete("1.0", "end")
         if not data:
-            tx.insert("end", "(vide)", "muted")
+            tx.insert("end", L("hex_empty"), "muted")
         else:
             tx.insert("end", "OFFSET    ", "muted")
             tx.insert("end", " ".join(f"{i:02X}" for i in range(16)), "muted")
@@ -1225,41 +1261,41 @@ class DskEditorApp:
             return
         self._show_hex(
             data,
-            f"{f.name}  [{f.source} {f.type_name} {f.length} o]  "
+            f"{f.name}  [{f.source} {f.type_name} {f.length} {L('sz_b')}]  "
             f"load=&{f.load_addr:04X}  @&{f.offset:05X}")
         self._file_secs = self._find_file_sectors(data)
         self._draw_map()
-        self._set_status(f"Fichier : {f.name} ({f.source}) · "
-                         f"{len(self._file_secs)} secteur(s) repéré(s)")
+        self._set_status(L("st_file", n=f.name, s=f.source,
+                           k=len(self._file_secs)))
 
     def show_sector(self) -> None:
         if self.disk is None:
-            self.info_box("Secteur", "Ouvrez d'abord une disquette.")
+            self.info_box(L("dlg_sector_title"), L("msg_open_first"))
             return
         try:
             track_s, sec_s = self.sector_var.get().split()
             track, sector = int(track_s), int(sec_s)
             data = self.disk.get_sector(track, sector)
         except (ValueError, ADFError) as exc:
-            self.error("Secteur invalide",
-                       f"« {self.sector_var.get()} » — {exc}\n\n"
-                       "Format attendu : « piste secteur », ex. 0 0.")
+            self.error(L("err_sector"),
+                       L("err_sector_fmt", v=self.sector_var.get(), e=exc))
             return
         self._cursor = (track, sector)
         self._draw_map()
-        self._show_hex(bytes(data), f"secteur piste {track} secteur {sector} "
-                                    f"({len(data)} o)")
-        self._set_status(f"Secteur {track}/{sector}")
+        self._show_hex(
+            bytes(data),
+            L("hex_sector", t=track, s=sector, n=len(data), u=L("sz_b")))
+        self._set_status(L("st_sector", t=track, s=sector))
 
     # ------------------------------------------------------------------ #
     # Actions fichiers
     # ------------------------------------------------------------------ #
     def add_file(self) -> None:
         if self.disk is None:
-            self.info_box("Ajout", "Créez ou ouvrez d'abord une disquette.")
+            self.info_box(L("dlg_add_title"), L("msg_create_first"))
             return
         local = filedialog.askopenfilename(
-            title="Fichier local à copier sur la disquette")
+            title=L("dlg_add_file_title"))
         if not local:
             return
         self._do_add_file(local)
@@ -1279,18 +1315,20 @@ class DskEditorApp:
                 exec_addr=dlg.result["load_addr"],
                 mode=dlg.result["mode"])
         except (CpcError, ADFError, OSError) as exc:
-            self.error("Échec de l'écriture", str(exc))
+            self.error(L("err_write"), str(exc))
             return
         self._scan_disk()
         self._file_secs = set()
         self._persist()
-        self._set_status(f"Fichier {dlg.result['name']!r} ({_fmt_size(len(data))}) "
-                         f"écrit [{dlg.result['mode']}].")
+        self._set_status(L("st_written",
+                           n=repr(dlg.result["name"]),
+                           sz=_fmt_size(len(data)),
+                           m=dlg.result["mode"]))
 
     def extract_file(self) -> None:
         f = self._selected_file()
         if f is None or self.disk is None:
-            self.info_box("Extraction", "Sélectionnez un fichier à extraire.")
+            self.info_box(L("dlg_extract_title"), L("msg_select_file"))
             return
         # Nom de fichier proposé avec l'extension CPC conservée :
         # « MONPROG BAS » -> « monprog.bas », sinon « nom.bin ».
@@ -1303,7 +1341,8 @@ class DskEditorApp:
                 if base:
                     name = f"{base.lower()}.{ext.lower()}"
         out = filedialog.asksaveasfilename(
-            title=f"Extraire {f.name} ({f.source})", initialfile=name)
+            title=L("dlg_extract_title2", n=f.name, s=f.source),
+            initialfile=name)
         if not out:
             return
         try:
@@ -1311,33 +1350,33 @@ class DskEditorApp:
             with open(out, "wb") as fh:
                 fh.write(data)
         except (CpcError, ADFError, OSError) as exc:
-            self.error("Échec de l'extraction", str(exc))
+            self.error(L("err_extract"), str(exc))
             return
-        self._set_status(f"{f.name} ({f.source}) extrait vers {out} "
-                         f"({_fmt_size(len(data))}).")
+        self._set_status(L("st_extracted", n=f.name, s=f.source, p=out,
+                           sz=_fmt_size(len(data))))
 
     def delete_file(self) -> None:
         f = self._selected_file()
         if f is None or self.disk is None:
-            self.info_box("Suppression", "Sélectionnez un fichier à supprimer.")
+            self.info_box(L("dlg_delete_title"), L("msg_select_delete"))
             return
         if not self.ask(
-                "Supprimer ?",
-                f"Effacer {f.name} ({f.source} · {f.type_name} · {f.length} o) "
-                "de la disquette ?\n\nLa disquette sera sauvegardée.",
+                L("dlg_delete_q"),
+                L("dlg_delete_msg", n=f.name, s=f.source, ty=f.type_name,
+                  len=f.length, u=L("sz_b")),
                 danger=True):
             return
         try:
             CpcFilesystem(self.disk).delete_file(f.name)
         except (CpcError, ADFError) as exc:
-            self.error("Échec de la suppression", str(exc))
+            self.error(L("err_delete"), str(exc))
             return
         self._scan_disk()
         self._file_secs = set()
         self._last_hex = None
         self._clear_hex()
         self._persist()
-        self._set_status(f"Fichier {f.name!r} supprimé.")
+        self._set_status(L("st_deleted", n=repr(f.name)))
 
     # ================================================================== #
     # Onglet Gotek
@@ -1350,7 +1389,7 @@ class DskEditorApp:
         tab.rowconfigure(0, weight=1)
 
         # --- sources ---
-        src = Panel(tab, self, "Sources · .dsk / .adf")
+        src = Panel(tab, self, L("panel_sources"))
         src.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.gtk_src_panel = src
         self._gotek_src_buttons = tk.Frame(src.body, bg=t.panel, padx=10,
