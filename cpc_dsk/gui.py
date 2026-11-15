@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unicodedata
 import tkinter as tk
 from tkinter import filedialog, ttk
@@ -39,9 +40,11 @@ from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import CpcError, CpcFile, CpcFilesystem, FT_BASIC, FT_BINARY
 from cpc_dsk.core.gotek import (
     DEFAULT_NAME_PATTERN,
+    FatFile,
     GotekConfig,
     GotekError,
     create_fat_image,
+    list_fat_image,
     prepare_usb_directory,
     verify_usb_directory,
 )
@@ -113,15 +116,19 @@ def _fmt_size(n: int) -> str:
 def _suggest_83(path: str) -> str:
     """Nom 8.3 suggéré à partir d'un nom de fichier local.
 
-    L'extension est **conservée**, en notation CPC (espace) :
+    L'extension est **conservée** (3 caractères), en notation CPC (espace) :
     ``monprog.bas`` -> ``MONPROG BAS``, ``data.bin`` -> ``DATA BIN``.
+    Le champ Filer est ``base(8) + ext(3)`` sans séparateur (l'espace n'est
+    que du padding) : la notation ``BASE EXT`` peut donc faire 12 caractères
+    (``programme.bas`` -> ``PROGRAMM BAS``, base 8 + ext 3 intacts).
     """
     base = os.path.basename(path)
     stem, dot, ext = base.partition(".")
     stem = stem.upper()[:8]
     if not dot:
         return stem
-    return f"{stem} {ext.upper()[:3]}"[:11].strip()
+    ext = ext.upper()[:3]
+    return " ".join(p for p in (stem, ext) if p)
 
 
 def _mix(c1: str, c2: str, a: float) -> str:
@@ -555,6 +562,8 @@ class DskEditorApp:
         self.path: Optional[str] = None
         self._files: List[CpcFile] = []
         self._gotek_sources: List[str] = []
+        self._gotek_img: Optional[str] = None
+        self._gotek_img_files: List[FatFile] = []
         self._geom: Tuple[int, int] = (0, 0)
         self._sec_data: List[List[bytes]] = []
         self._sec_used: List[List[bool]] = []
@@ -1466,6 +1475,18 @@ class DskEditorApp:
         PixelButton(acts, self, "Image FAT", padx=12,
                     command=self.gotek_fat_image).pack(side="left")
 
+        # Chargement d'une image existante (.img) : liste le contenu, puis
+        # « → Sources » (disquettes vers la pile) ou « Extraire… » (dossier).
+        acts2 = tk.Frame(out.body, bg=t.panel, padx=14)
+        acts2.pack(fill="x", pady=(0, 14))
+        PixelButton(acts2, self, "Charger l'image…", icon="open", padx=10,
+                    command=self.gotek_load_image).pack(side="left")
+        PixelButton(acts2, self, "→ Sources", icon="up", padx=10,
+                    command=self.gotek_img_to_sources).pack(side="left",
+                                                            padx=8)
+        PixelButton(acts2, self, "Extraire…", icon="extract", padx=10,
+                    command=self.gotek_img_extract).pack(side="left")
+
         self._gotek_refresh_tree()
         self._gotek_result_render()
 
@@ -1690,6 +1711,88 @@ class DskEditorApp:
             return
         self._gotek_result_show([out_img], tag="IMAGE FAT OK")
         self._set_status(f"Gotek : image FAT créée : {out_img}")
+
+    # ------------------------------------------------------------------ #
+    # Chargement d'une image FAT16 existante (.img de clé Gotek)
+    # ------------------------------------------------------------------ #
+    def gotek_load_image(self) -> None:
+        """Charge une image ``.img`` et liste son contenu dans Résultat."""
+        img = filedialog.askopenfilename(
+            title="Image FAT de clé Gotek à charger",
+            filetypes=[("Image FAT", "*.img *.bin *.raw"), ("Tous", "*.*")])
+        if not img:
+            return
+        try:
+            files = list_fat_image(img)
+        except (GotekError, OSError) as exc:
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error("Chargement de l'image", str(exc))
+            return
+        self._gotek_img = img
+        self._gotek_img_files = files
+        if not files:
+            self._gotek_result_show(["(aucun fichier à la racine)"],
+                                    tag="VIDE", progress=0)
+            self._set_status(f"Gotek : image chargée : {os.path.basename(img)} (vide)")
+            return
+        lines = [f"{f.name}  {_fmt_size(f.size)}" for f in files]
+        self._gotek_result_show(lines, tag="DANS L'IMAGE")
+        self._set_status(
+            f"Gotek : {len(files)} fichier(s) dans {os.path.basename(img)} — "
+            "« → Sources » ou « Extraire… »")
+
+    def gotek_img_to_sources(self) -> None:
+        """Extrait les .dsk/.adf de l'image chargée dans un dossier temp et
+        les ajoute à la pile des sources Gotek."""
+        if not self._gotek_img_files:
+            self.info_box("Aucune image",
+                          "Chargez d'abord une image « .img » "
+                          "(bouton « Charger l'image… »).")
+            return
+        disks = [f for f in self._gotek_img_files
+                 if f.name.lower().endswith((".adf", ".dsk"))]
+        if not disks:
+            self.info_box("Pas de disquettes",
+                          "L'image ne contient aucun fichier .dsk/.adf.")
+            return
+        tmp = tempfile.mkdtemp(prefix="cpc-gotek-")
+        added: List[str] = []
+        for f in disks:
+            p = os.path.join(tmp, f.name)
+            try:
+                with open(p, "wb") as fh:
+                    fh.write(f.data)
+            except OSError as exc:
+                self.error("Écriture du dossier temp", str(exc))
+                return
+            added.append(p)
+        self.gotek_add_paths(added)
+        self._set_status(
+            f"Gotek : {len(added)} disquette(s) ajoutée(s) aux sources "
+            f"(dossier temp : {tmp}).")
+
+    def gotek_img_extract(self) -> None:
+        """Extrait tous les fichiers de l'image chargée dans un dossier choisi."""
+        if not self._gotek_img_files:
+            self.info_box("Aucune image",
+                          "Chargez d'abord une image « .img » "
+                          "(bouton « Charger l'image… »).")
+            return
+        d = filedialog.askdirectory(title="Dossier de destination")
+        if not d:
+            return
+        try:
+            for f in self._gotek_img_files:
+                with open(os.path.join(d, f.name), "wb") as fh:
+                    fh.write(f.data)
+        except OSError as exc:
+            self.error("Échec de l'extraction", str(exc))
+            return
+        self._gotek_result_show([f.name for f in self._gotek_img_files],
+                                tag="EXTRAIT")
+        self._set_status(
+            f"Gotek : {len(self._gotek_img_files)} fichier(s) extrait(s) "
+            f"dans {d}.")
 
     # ================================================================== #
     # Glisser-déposer (explorateur Windows)

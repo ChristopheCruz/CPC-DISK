@@ -13,7 +13,9 @@ Ce module fournit les briques fiables et indépendantes de l'environnement :
     - créer une *image FAT16 complète* (fichier ``.img`` prêt à flasher sur
       la clé) via :func:`create_fat_image` — rédacteur FAT16 **intégré,
       sans aucune dépendance** (fonctionne sous Windows, Linux et dans
-      l'exécutable PyInstaller).
+      l'exécutable PyInstaller),
+    - lire le contenu d'une image FAT16 existante via
+      :func:`list_fat_image` (noms + données des fichiers de la racine).
 
 NOTE DE VALIDATION
 ==================
@@ -153,6 +155,104 @@ def create_fat_image(
     config = config or GotekConfig()
     return _write_fat16_image(output_img, _collect_ades(sources, config),
                               size_mb * 1024 * 1024, volume_label="CPC-GOTEK")
+
+
+@dataclass
+class FatFile:
+    """Fichier lu dans une image FAT16 (contenu d'une clé Gotek)."""
+    name: str
+    size: int
+    data: bytes
+
+
+def list_fat_image(path: str) -> List[FatFile]:
+    """Lit une image FAT16 (``.img`` de clé Gotek) et renvoie ses fichiers.
+
+    Analyse le secteur d'amorçage (BPB), la table FAT16 et le répertoire
+    racine, puis reconstitue chaque fichier en suivant sa chaîne de
+    clusters. Les entrées « volume ID », supprimées (0xE5), les dossiers
+    et les entrées LFN sont ignorés.
+
+    Renvoie la liste des :class:`FatFile` de la racine (noms au format
+    ``BASE.EXT``). Lève :class:`GotekError` si le fichier n'est pas une
+    image FAT16 lisible (le rédacteur intégré produit de la FAT16, ~32 Mo
+    max — les volumes FAT12/FAT32 ne sont pas supportés).
+    """
+    with open(path, "rb") as fh:
+        img = fh.read()
+    if len(img) < 2 * 512 or img[510:512] != b"\x55\xaa":
+        raise GotekError(
+            "Pas une image FAT (secteur d'amorçage absent) — attends un "
+            ".img produit par cet outil ou par mkfs.fat.")
+
+    bps = struct.unpack_from("<H", img, 0x0B)[0]
+    spc = img[0x0D]
+    reserved = struct.unpack_from("<H", img, 0x0E)[0]
+    nfats = img[0x10]
+    rootent = struct.unpack_from("<H", img, 0x11)[0]
+    fatsz16 = struct.unpack_from("<H", img, 0x16)[0]
+    if (not bps or not spc or not reserved or not 1 <= nfats <= 4
+            or not rootent):
+        raise GotekError("BPB incohérent : ce fichier n'est pas une image FAT.")
+    if not fatsz16:
+        raise GotekError(
+            "Image FAT12/FAT32 non supportée : cet outil lit les images "
+            "FAT16 (rédacteur intégré, ~32 Mo max).")
+
+    fat_off = reserved * bps
+    fat_size = fatsz16 * bps
+    if fat_off + 2 * nfats * fat_size > len(img):
+        raise GotekError("Image tronquée : les tables FAT dépassent le fichier.")
+    fat = img[fat_off:fat_off + fat_size]
+
+    root_off = fat_off + nfats * fat_size
+    root_bytes = rootent * 32
+    if root_off + root_bytes > len(img):
+        raise GotekError("Image tronquée : le répertoire racine dépasse le "
+                         "fichier.")
+    data_start_sec = root_off // bps + (root_bytes + bps - 1) // bps
+    n_entries = len(fat) // 2
+
+    def fat16(c: int) -> int:
+        return struct.unpack_from("<H", fat, 2 * c)[0]
+
+    def read_chain(first: int, size: int) -> bytes:
+        if size == 0:
+            return b""
+        if not (2 <= first < 0xFFF8):
+            return b"\x00" * size  # entrée corrompue : données inconnues
+        out = bytearray()
+        c = first
+        for _ in range(100000):  # garde contre une chaîne cyclique
+            if not (2 <= c < 0xFFF8) or c >= n_entries:
+                break
+            off = (data_start_sec + (c - 2) * spc) * bps
+            if off + bps > len(img):
+                break
+            out += img[off:off + bps]
+            if len(out) >= size:
+                break
+            c = fat16(c)
+        return bytes(out[:size])
+
+    files: List[FatFile] = []
+    for i in range(rootent):
+        ent = img[root_off + 32 * i:root_off + 32 * (i + 1)]
+        if ent[0] in (0x00, 0xE5):
+            continue
+        attr = ent[11]
+        if attr & (0x08 | 0x10) or attr == 0x0F:
+            continue  # volume ID, dossier ou entrée LFN
+        base = ent[0:8].decode("latin1").strip()
+        ext = ent[8:11].decode("latin1").strip()
+        name = f"{base}.{ext}" if ext else base
+        if not name:
+            continue
+        size = struct.unpack_from("<I", ent, 28)[0]
+        first = struct.unpack_from("<H", ent, 26)[0]
+        files.append(FatFile(name=name, size=size,
+                             data=read_chain(first, size)))
+    return files
 
 
 def _collect_ades(

@@ -10,6 +10,7 @@ from cpc_dsk.core.gotek import (
     GotekConfig,
     GotekError,
     create_fat_image,
+    list_fat_image,
     prepare_usb_directory,
     verify_usb_directory,
 )
@@ -121,6 +122,54 @@ def test_create_fat_image_no_sources(tmp_path):
     assert info["files"] == {}
 
 
+def test_list_fat_image_roundtrip(tmp_path):
+    """list_fat_image relit une image produite par create_fat_image."""
+    d1 = str(tmp_path / "d1.adf")
+    ADFDisk.new_blank().save(d1)
+    d2 = str(tmp_path / "d2.adf")
+    d2_data = bytes(ADFDisk.new_blank()._raw)
+    ADFDisk.new_blank().save(d2)
+
+    out = str(tmp_path / "cle.img")
+    create_fat_image(out, [d1, d2], GotekConfig(), size_mb=4)
+
+    files = list_fat_image(out)
+    assert [f.name for f in files] == ["DISK001.ADF", "DISK002.ADF"]
+    expected = open(d1, "rb").read()
+    assert files[0].size == len(expected)
+    assert files[0].data == expected
+    assert files[1].data == d2_data[:files[1].size]
+
+
+def test_list_fat_image_many(tmp_path):
+    """8 disquettes (chaînes multi-clusters) : tout est récupéré intact."""
+    src = str(tmp_path / "src.adf")
+    ADFDisk.new_blank().save(src)
+    out = str(tmp_path / "many.img")
+    create_fat_image(out, [src] * 8, GotekConfig(), size_mb=8)
+
+    files = list_fat_image(out)
+    assert [f.name for f in files] == [f"DISK{i:03d}.ADF" for i in range(1, 9)]
+    expected = open(src, "rb").read()
+    for f in files:
+        assert f.size == len(expected)
+        assert f.data == expected
+
+
+def test_list_fat_image_empty(tmp_path):
+    out = str(tmp_path / "vide.img")
+    create_fat_image(out, [], GotekConfig(), size_mb=4)
+    assert list_fat_image(out) == []
+
+
+def test_list_fat_image_rejects_junk(tmp_path):
+    p = str(tmp_path / "junk.img")
+    with open(p, "wb") as fh:
+        fh.write(b"\x00" * 8192)
+    with pytest.raises(GotekError):
+        list_fat_image(p)
+
+
 def test_prepare_and_verify_usb_directory(tmp_path):
     src = str(tmp_path / "src.dsk")
     ADFDisk.new_blank().save(src)
@@ -136,4 +185,15 @@ def test_suggest_83_keeps_extension():
     assert _suggest_83("data.bin") == "DATA BIN"
     assert _suggest_83("archive.zip") == "ARCHIVE ZIP"
     assert _suggest_83("noext") == "NOEXT"
-    assert _suggest_83("longuename.bin") == "LONGUENA BI"  # tronqué à 11 o
+    # base 8 + ext 3 : l'extension reste INTACTE (notation espace = 12 o,
+    # le champ Filer 8+3 sans séparateur est de 11 o après normalisation).
+    assert _suggest_83("longuename.bin") == "LONGUENA BIN"
+
+
+def test_suggest_83_long_base_keeps_full_extension():
+    from cpc_dsk.core.cpcfs import _normalize_83
+    # Une base de 8 caractères ne doit pas rogner la 3e lettre de l'extension.
+    sug = _suggest_83("programme.bas")
+    assert sug == "PROGRAMM BAS"
+    # La normalisation donne un champ 8.3 de 11 o, extension complète.
+    assert _normalize_83(sug) == "PROGRAMM BAS"[:8].ljust(8) + "BAS"
