@@ -14,7 +14,7 @@ from cpc_dsk.core.gotek import (
     prepare_usb_directory,
     verify_usb_directory,
 )
-from cpc_dsk.gui import _suggest_83
+from cpc_dsk.gui import _fmt_size, _suggest_83
 
 
 # --- Mini-lecteur FAT16 (indépendant) pour valider les images produites --- #
@@ -197,3 +197,21 @@ def test_suggest_83_long_base_keeps_full_extension():
     assert sug == "PROGRAMM BAS"
     # La normalisation donne un champ 8.3 de 11 o, extension complète.
     assert _normalize_83(sug) == "PROGRAMM BAS"[:8].ljust(8) + "BAS"
+
+
+def test_fmt_size_units_by_language():
+    """Régression : _fmt_size appelait ``t(...)`` (non défini au module) →
+    NameError au premier affichage de taille (bouton « Ajouter »)."""
+    from cpc_dsk.i18n import get_language, set_language
+    prev = get_language()
+    try:
+        set_language("en")
+        assert _fmt_size(512) == "512 B"
+        assert _fmt_size(2048) == "2.0 KB"
+        assert _fmt_size(3 * 1024 * 1024) == "3.0 MB"
+        set_language("fr")
+        assert _fmt_size(512) == "512 o"
+        assert _fmt_size(2048) == "2.0 Ko"
+        assert _fmt_size(3 * 1024 * 1024) == "3.0 Mo"
+    finally:
+        set_language(prev)

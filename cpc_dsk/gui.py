@@ -109,10 +109,10 @@ PIXEL_BODY = "VT323"
 # ====================================================================== #
 def _fmt_size(n: int) -> str:
     if n >= 1024 * 1024:
-        return f"{n / (1024 * 1024):.1f} {t('sz_mb')}"
+        return f"{n / (1024 * 1024):.1f} {L('sz_mb')}"
     if n >= 1024:
-        return f"{n / 1024:.1f} {t('sz_kb')}"
-    return f"{n} {t('sz_b')}"
+        return f"{n / 1024:.1f} {L('sz_kb')}"
+    return f"{n} {L('sz_b')}"
 
 
 def _suggest_83(path: str) -> str:
