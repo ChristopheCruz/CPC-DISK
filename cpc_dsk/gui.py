@@ -104,6 +104,26 @@ PIXEL_TITLE = "Press Start 2P"
 PIXEL_BODY = "VT323"
 
 
+def _apply_window_icon(root) -> None:
+    """Icône de la fenêtre : disquette CPC (ico sous Windows, png ailleurs).
+
+    Sous PyInstaller one-file, les fichiers sont décompressés dans le
+    dossier temporaire du paquetage : FONT_DIR les trouve au même endroit.
+    """
+    global _icon_ref
+    try:
+        if sys.platform == "win32":
+            ico = os.path.join(FONT_DIR, "..", "icon.ico")
+            if os.path.exists(ico):
+                root.iconbitmap(ico)
+        png = os.path.join(FONT_DIR, "..", "icon.png")
+        if os.path.exists(png):
+            _icon_ref = tk.PhotoImage(file=png)
+            root.iconphoto(True, _icon_ref)
+    except (tk.TclError, OSError):
+        pass
+
+
 # ====================================================================== #
 # Utilitaires
 # ====================================================================== #
@@ -1900,6 +1920,7 @@ def run() -> None:
                 pass
     _load_private_fonts()
     root = tk.Tk()
+    _apply_window_icon(root)
     DskEditorApp(root)
     root.mainloop()
 

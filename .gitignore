@@ -41,3 +41,6 @@ cpc_tools/
 # OS
 .DS_Store
 Thumbs.db
+
+# Propositions de logo (dossier de travail, pas le logo final docs/logo.png)
+docs/logo/
