@@ -237,6 +237,11 @@ class CpcFilesystem:
     def _track_data_size(self, track: int) -> int:
         return self.disk.track_sizes[track] - TRACK_INFO_SIZE
 
+    def _capacity(self) -> int:
+        """Taille totale de l'espace de données linéaire (toutes pistes)."""
+        return sum(self._track_data_size(t)
+                   for t in range(self.disk.num_tracks))
+
     def _linear_to_image(self, lin: int) -> int:
         """Position linéaire (données) -> offset dans l'image brute."""
         cum = 0
@@ -268,12 +273,17 @@ class CpcFilesystem:
             if rem <= 0:
                 break
             tsize = self._track_data_size(track)
+            if pos >= tsize:
+                # Piste entièrement avant la position cible : on la saute en
+                # décrémentant (un simple pos = 0 reposerait au début de la
+                # piste suivante et écraserait / lirait la mauvaise région).
+                pos -= tsize
+                continue
             base = self.disk.track_offsets[track] + TRACK_INFO_SIZE
-            if pos < tsize:
-                take = min(rem, tsize - pos)
-                buf += self.disk._raw[base + pos:base + pos + take]
-                rem -= take
-            pos = 0
+            take = min(rem, tsize - pos)
+            buf += self.disk._raw[base + pos:base + pos + take]
+            rem -= take
+            pos = 0  # la suite continue au début de la piste suivante
         if rem > 0:
             raise CpcError("Capacité disque dépassée.")
         return bytes(buf)
@@ -288,11 +298,13 @@ class CpcFilesystem:
             if written >= len(data):
                 break
             tsize = self._track_data_size(track)
+            if pos >= tsize:
+                pos -= tsize
+                continue
             base = self.disk.track_offsets[track] + TRACK_INFO_SIZE
-            if pos < tsize:
-                take = min(len(data) - written, tsize - pos)
-                raw[base + pos:base + pos + take] = data[written:written + take]
-                written += take
+            take = min(len(data) - written, tsize - pos)
+            raw[base + pos:base + pos + take] = data[written:written + take]
+            written += take
             pos = 0
         if written < len(data):
             raise CpcError("Capacité disque dépassée.")
@@ -369,26 +381,34 @@ class CpcFilesystem:
     # AMSDOS — balayage des en-têtes
     # ------------------------------------------------------------------ #
     def _scan_amsdos(self) -> List[CpcFile]:
-        """Balaye l'image et retourne les fichiers AMSDOS valides."""
-        raw = bytes(self.disk._raw)
+        """Retourne les fichiers AMSDOS valides (méthode de balayage CERMU).
+
+        Le balayage porte sur le **flux physique** (données de secteurs
+        concaténées, sans en-têtes Track-Info) — c'est ce flux que voit un
+        lecteur AMSDOS. Un fichier traverse les pistes ; les en-têtes de
+        blocs sont de la métadonnée du conteneur. ``CpcFile.offset`` reste
+        un offset d'image (pour affichage / hex).
+        """
+        stream = self._read_linear(0, self._capacity())
         files: List[CpcFile] = []
-        for pos in range(0, len(raw) - (CHECKSUM_OFFSET + 2)):
-            name_raw = raw[NAME_OFFSET + pos:NAME_OFFSET + pos + NAME_SIZE]
+        for pos in range(0, len(stream) - (CHECKSUM_OFFSET + 2)):
+            name_raw = stream[NAME_OFFSET + pos:NAME_OFFSET + pos + NAME_SIZE]
             if not _valid_name(name_raw):
                 continue
-            s = sum(raw[pos:pos + CHECKSUM_COVERED]) & 0xFFFF
-            stored = raw[pos + CHECKSUM_OFFSET] | (raw[pos + CHECKSUM_OFFSET + 1] << 8)
+            s = sum(stream[pos:pos + CHECKSUM_COVERED]) & 0xFFFF
+            stored = (stream[pos + CHECKSUM_OFFSET]
+                      | (stream[pos + CHECKSUM_OFFSET + 1] << 8))
             if s != stored:
                 continue
-            ftype = raw[pos + TYPE_OFFSET] | (raw[pos + TYPE_OFFSET + 1] << 8)
-            load = raw[pos + LOAD_OFFSET] | (raw[pos + LOAD_OFFSET + 1] << 8)
-            execa = raw[pos + EXEC_OFFSET] | (raw[pos + EXEC_OFFSET + 1] << 8)
-            full = (raw[pos + LEN24_OFFSET]
-                    | (raw[pos + LEN24_OFFSET + 1] << 8)
-                    | (raw[pos + LEN24_OFFSET + 2] << 16))
+            ftype = stream[pos + TYPE_OFFSET] | (stream[pos + TYPE_OFFSET + 1] << 8)
+            load = stream[pos + LOAD_OFFSET] | (stream[pos + LOAD_OFFSET + 1] << 8)
+            execa = stream[pos + EXEC_OFFSET] | (stream[pos + EXEC_OFFSET + 1] << 8)
+            full = (stream[pos + LEN24_OFFSET]
+                    | (stream[pos + LEN24_OFFSET + 1] << 8)
+                    | (stream[pos + LEN24_OFFSET + 2] << 16))
             files.append(CpcFile(
                 name=_clean_name(name_raw),
-                offset=pos,
+                offset=self._linear_to_image(pos),
                 file_type=ftype,
                 load_addr=load,
                 exec_addr=execa,
@@ -464,11 +484,11 @@ class CpcFilesystem:
         f = self.find(name, source)
         if f is None:
             raise CpcError(f"Fichier introuvable: {name!r}")
-        raw = bytes(self.disk._raw)
+        # Flux physique : le fichier peut traverser plusieurs pistes.
+        lin = self._image_to_linear(f.offset)
         if f.source == "FILER":
-            return raw[f.offset:f.offset + f.length]
-        start = f.offset + AMSDOS_HEADER_SIZE
-        return raw[start:start + f.length]
+            return self._read_linear(lin, f.length)
+        return self._read_linear(lin + AMSDOS_HEADER_SIZE, f.length)
 
     # ------------------------------------------------------------------ #
     # Frontières d'allocation
@@ -482,8 +502,7 @@ class CpcFilesystem:
         empilés vers l'arrière depuis la fin du disque. Les deux ne
         s'entrecroisent que quand le disque est plein.
         """
-        capacity = sum(self._track_data_size(t)
-                       for t in range(self.disk.num_tracks))
+        capacity = self._capacity()
         pack_end = self._pack_bounds()[1]
         frontier = capacity
         for a in self._scan_amsdos():
@@ -503,10 +522,10 @@ class CpcFilesystem:
     def _assert_amsdos_outside_pack(self) -> None:
         """Refuse de réorganiser le paquet Filer si des objets AMSDOS s'y
         trouvent (disque ambigü — les données seraient écrasées)."""
-        pack_img0 = self._linear_to_image(DIR_SECTOR_SIZE)
-        pack_img1 = self._linear_to_image(self._pack_bounds()[1])
+        pack_start, pack_end = self._pack_bounds()
         for a in self._scan_amsdos():
-            if pack_img0 <= a.offset < pack_img1:
+            start = self._image_to_linear(a.offset)
+            if pack_start <= start < pack_end:
                 raise CpcError(
                     "Objet AMSDOS détecté dans le paquet Filer: disque ambigü, "
                     "écriture/suppression Filer refusée (utilisez --fs amsdos "
@@ -626,7 +645,6 @@ class CpcFilesystem:
         if mode in ("amsdos", "both") and self.find(field11, source="amsdos") is not None:
             raise CpcError(f"Fichier déjà présent (AMSDOS): {field11!r}")
 
-        raw = self.disk._raw
         total_units = (len(data) + DIR_UNIT_SIZE - 1) // DIR_UNIT_SIZE
         total_bytes = total_units * DIR_UNIT_SIZE
 
@@ -644,6 +662,7 @@ class CpcFilesystem:
                     "(disque partiellement utilisé d'une façon inconnue).")
             filer_end = pack_end + total_bytes
 
+        dest_a = None
         if mode in ("amsdos", "both"):
             need = AMSDOS_HEADER_SIZE + len(data)
             end_front = self._amsdos_end_frontier()
@@ -651,12 +670,13 @@ class CpcFilesystem:
                 raise CpcError(
                     f"Pas assez d'espace libre (objet AMSDOS {need} o + paquet "
                     f"Filer).")
-            pos_a = self._linear_to_image(end_front - need)
-            if not self._linear_region_free(end_front - need, need):
+            dest_a = end_front - need
+            if not self._linear_region_free(dest_a, need):
                 raise CpcError(
                     f"Espace de destination AMSDOS occupé par des données "
                     f"inattendues (disque partiellement utilisé d'une façon "
                     f"inconnue).")
+            pos_a = self._linear_to_image(dest_a)
 
         # 1) Fichier Filer : données brutes (remplies à 128 o) + entrées.
         if mode in ("filer", "both"):
@@ -679,7 +699,10 @@ class CpcFilesystem:
             dir_field = field11.replace(".", chr(DIR_DOT_BYTE)).encode("latin1")
             self._repack_filer(insert=(dir_field, chunks, slot, padded))
 
-        # 2) Objet AMSDOS : en-tête 128 o + données.
+        # 2) Objet AMSDOS : en-tête 128 o + données, écrits dans le flux
+        #    physique : l'objet traverse les pistes sans toucher les
+        #    en-têtes Track-Info du conteneur (agencement des disques réels,
+        #    vérifié sur greed.dsk).
         if mode in ("amsdos", "both"):
             hdr = bytearray(AMSDOS_HEADER_SIZE)
             hdr[NAME_OFFSET:NAME_OFFSET + NAME_SIZE] = field11.encode("latin1")
@@ -690,8 +713,7 @@ class CpcFilesystem:
             hdr[LEN24_OFFSET:LEN24_OFFSET + 3] = len(data).to_bytes(3, "little")
             csum = sum(hdr[:CHECKSUM_COVERED]) & 0xFFFF
             hdr[CHECKSUM_OFFSET:CHECKSUM_OFFSET + 2] = struct.pack("<H", csum)
-            raw[pos_a:pos_a + AMSDOS_HEADER_SIZE] = hdr
-            raw[pos_a + AMSDOS_HEADER_SIZE:pos_a + AMSDOS_HEADER_SIZE + len(data)] = data
+            self._write_linear(dest_a, bytes(hdr) + data)
 
         return CpcFile(
             name=field11.rstrip(),
@@ -734,9 +756,9 @@ class CpcFilesystem:
 
         f = self.find(field11, source="amsdos")
         if f is not None:
-            raw = self.disk._raw
-            size = AMSDOS_HEADER_SIZE + f.length
-            raw[f.offset:f.offset + size] = b"\x00" * size
+            # Flux physique : l'objet peut traverser plusieurs pistes.
+            lin = self._image_to_linear(f.offset)
+            self._write_linear(lin, b"\x00" * (AMSDOS_HEADER_SIZE + f.length))
             deleted = True
 
         if not deleted:

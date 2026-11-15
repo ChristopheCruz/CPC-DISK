@@ -67,7 +67,59 @@ def test_file_metadata():
     assert f.type_name == "BIN"
 
 
-# --- Test optionnel sur une vraie disquette ---
+def _all_track_headers_intact(d: ADFDisk) -> bool:
+    raw = bytes(d._raw)
+    return all(raw[t:t + 12] == b"Track-Info\r\n"
+               for t in d.track_offsets)
+
+
+def test_linear_space_crosses_tracks():
+    """Écriture/lecture à une position profonde (au-delà de la 1re piste)
+    doivent atterrir exactement à l'offset d'image attendu."""
+    d = ADFDisk.new_blank()
+    fs = CpcFilesystem(d)
+    cap = fs._capacity()
+    data = bytes((i * 7) & 0xFF for i in range(5000))  # traverse 2+ pistes
+    fs._write_linear(cap - 5000, data)
+    assert fs._read_linear(cap - 5000, 5000) == data
+    # Position d'image exacte (pas « piste 1 + 0 »).
+    img = fs._linear_to_image(cap - 5000)
+    assert bytes(d._raw)[img] == data[0]
+    assert _all_track_headers_intact(d)
+    # Lecture partielle à cheval sur la fin de piste.
+    assert fs._read_linear(cap - 40, 40) == data[5000 - 40:]
+
+
+def test_amsdos_object_crosses_tracks(tmp_path):
+    """Objet AMSDOS plus grand qu'une piste : écriture en flux physique
+    (en-têtes Track-Info intacts), aller-retour, ajout d'un 2e fichier
+    (régression : l'ajout suivant l'écriture d'un gros fichier échouait),
+    suppression."""
+    d = ADFDisk.new_blank()
+    fs = CpcFilesystem(d)
+    payload = bytes(range(256)) * 79  # 20224 o > 4608 o (une piste)
+    f = fs.write_file("GROS    BIN", payload, file_type=FT_BINARY,
+                      load_addr=0x9000, mode="amsdos")
+    assert _all_track_headers_intact(d)
+    assert f.offset == fs._linear_to_image(fs._image_to_linear(f.offset))
+    assert fs.read_file("GROS    BIN") == payload
+
+    # Un deuxième fichier doit pouvoir s'ajouter ensuite.
+    fs.write_file("DEUX    BAS", b"10 PRINT 1\n", file_type=FT_BASIC,
+                  load_addr=0x4000, mode="amsdos")
+    assert fs.read_file("DEUX    BAS") == b"10 PRINT 1\n"
+    assert fs.read_file("GROS    BIN") == payload
+    assert _all_track_headers_intact(d)
+
+    # Suppression : le grand fichier disparaît, l'autre reste.
+    d.save(os.path.join(tmp_path, "g.dsk"))
+    fs2 = CpcFilesystem(ADFDisk.load(os.path.join(tmp_path, "g.dsk")))
+    fs2.delete_file("GROS    BIN")
+    assert "GROS    BIN" not in {f.name for f in fs2.list_files(source="amsdos")}
+    assert fs2.read_file("DEUX    BAS") == b"10 PRINT 1\n"
+
+
+# --- Tests optionnels sur de vraies disquettes ---
 @pytest.mark.skipif(not os.path.exists("/tmp/greed.dsk"),
                     reason="greed.dsk de référence absent")
 def test_real_greed_files():
@@ -81,3 +133,19 @@ def test_real_greed_files():
     assert len(fs.read_file("YOGI    BAS")) > 0
     # Le répertoire (vue secondaire) doit lister des noms.
     assert len(fs.read_directory_names()) > 0
+
+
+@pytest.mark.skipif(not os.path.exists("/tmp/greed.dsk"),
+                    reason="greed.dsk de référence absent")
+def test_real_greed_amsdos_physical_read():
+    """Lecture AMSDOS = flux physique : les données extraites ne peuvent
+    contenir les en-têtes Track-Info du conteneur (la lecture dans
+    l'image brute en contenait 6 pour YOGI1 BIN, 25 192 o traversant
+    5 pistes)."""
+    fs = CpcFilesystem(ADFDisk.load("/tmp/greed.dsk"))
+    expected = {"YOGI    BAS": 631, "YOGI1   BIN": 25192,
+                "YOGI2   BIN": 40832, "YOGI3   BIN": 7552}
+    for name, length in expected.items():
+        data = fs.read_file(name, source="amsdos")
+        assert len(data) == length
+        assert b"Track-Info\r\n" not in data, name

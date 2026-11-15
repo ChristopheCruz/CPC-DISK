@@ -73,6 +73,12 @@ Deux couches coexistent sur une disquette CPC (vérifié sur images réelles) :
    longueur, checksum) localisé par balayage — c'est la méthode de l'émulateur
    CERMU, qui ne lit pas le répertoire Filer.
 
+   Les objets AMSDOS vivent dans le **flux physique** du disque : un fichier
+   traverse les pistes et les en-têtes `Track-Info` du conteneur restent
+   intacts entre ses octets (vérifié sur `greed.dsk` : `YOGI1 BIN`, 25 192 o,
+   traverse 5 pistes). Le balayage, la lecture, l'écriture et la suppression
+   se font donc toutes dans ce flux linéaire, jamais dans l'image brute.
+
 ## Installation
 
 ```bash
@@ -90,13 +96,21 @@ python -m cpc_dsk.gui
 Deux onglets :
 
 - **Disquette (.dsk)** : ouvrir / créer / sauvegarder, liste des fichiers
-  avec leur couche (`FILER` / `AMSDOS`), ajout d'un fichier local (nom 8.3,
-  type, adresse de chargement, couche `both`/`filer`/`amsdos`), extraction,
-  suppression, hexdumper de fichier ou de secteur brut.
+  avec leur couche (`FILER` / `AMSDOS`), ajout d'un fichier local (nom 8.3
+  **préserver l'extension**, type, adresse de chargement, couche `amsdos`
+  par défaut / `both` / `filer`), extraction (le nom proposé retrouve son
+  extension), suppression, hexdumper de fichier ou de secteur brut.
 - **Gotek (clé USB)** : pile de sources `.dsk`/`.adf`, options de nommage
   (`DISK%03d.adf`, sous-dossier, index de départ), génération du répertoire à
-  copier sur la clé, vérification des images, et création d'une image FAT
-  complète quand `mformat`/`mkfs.fat` est disponible.
+  copier sur la clé, vérification des images, et création d'une image
+  **FAT16 complète** (rédacteur intégré, aucune dépendance — compatible
+  `mkfs.fat` 4.2, vérifiée avec `fsck.fat` et `blkid`).
+
+**Glisser-déposer (Windows)** : depuis l'explorateur, déposer directement
+sur la fenêtre — `.dsk`/`.adf` s'ouvrent (ou rejoignent les sources Gotek
+selon l'onglet actif), les autres fichiers s'ajoutent à la disquette ouverte
+(dialogue 8.3). Implémenté avec l'API `RegisterDragHook` (aucune
+dépendance externe) ; inactif sous Linux/macOS.
 
 ## Exécutable autonome (PyInstaller)
 
@@ -185,14 +199,17 @@ prepare_usb_directory("cle_usb/", ["jeu1.dsk", "jeu2.dsk"], GotekConfig())
 ```
 
 Voir `cpc_dsk/core/gotek.py` : validation des sources, préfixage
-`DISK000.adf…`, sous-dossier, index de départ, vérification du résultat et
-création optionnelle d'une image FAT complète (nécessite `mformat` ou
-`mkfs.fat`).
+`DISK%03d.adf…`, sous-dossier, index de départ, vérification du résultat et
+création d'une image FAT16 complète (32 Mo par défaut, fichiers à la racine)
+par le **rédacteur intégré** : son secteur d'amorçage reproduit byte-par-byte
+la disposition « compacte » de `mkfs.fat` 4.2 (celle qu'attendent fsck.fat et
+libblkid — pas la variante « extended BPB » du manuel Microsoft).
 
 ## Validation du format
 
-- Le conteneur, le répertoire Filer et les fichiers AMSDOS sont **testés**
-  (`pytest`, 31 tests) et **vérifiés sur des disquettes réelles** :
+- Le conteneur, le répertoire Filer, les fichiers AMSDOS et l'image FAT16
+  Gotek sont **testés** (`pytest`, 40 tests) et **vérifiés sur des
+  disquettes réelles** :
   - `greed.dsk` (*Yogi Bear*) : 4 fichiers Filer (768 / 25344 / 40960 / 7680 o)
     + 4 objets AMSDOS,
   - `robot.dsk` (*Robot PD 14400*) : 10 fichiers Filer en 12 entrées
@@ -207,9 +224,10 @@ création optionnelle d'une image FAT complète (nécessite `mformat` ou
 - La longueur exacte d'un fichier Filer n'est pas stockée dans le répertoire
   (unités de 128 o) : la lecture `--source filer` renvoie la région allouée
   complète (remplissage à zéro inclus), comme la charge réelle du Filer.
-- L'image FAT complète pour cloner directement la clé Gotek dépend d'un outil
-  `mformat`/`mkfs.fat` (sinon on copie le répertoire généré sur une clé
-  formatée FAT16/FAT32).
+- L'image FAT16 (rédacteur intégré) est plafonnée à ~32 Mo avec cette
+  géométrie (512 o/secteur, 1 secteur/cluster) : de quoi couvrir les clés
+  Gotek classiques. Pour une clé plus grande, copier le répertoire généré
+  sur une clé formatée FAT16/FAT32.
 
 ## Licence
 

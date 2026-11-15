@@ -18,6 +18,7 @@ Lancement:
 from __future__ import annotations
 
 import os
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import List, Optional
@@ -44,9 +45,77 @@ def _fmt_size(n: int) -> str:
 
 
 def _suggest_83(path: str) -> str:
-    """Nom 8.3 suggéré à partir d'un nom de fichier local."""
-    stem = os.path.splitext(os.path.basename(path))[0].upper()
-    return stem[:11]
+    """Nom 8.3 suggéré à partir d'un nom de fichier local.
+
+    L'extension est **conservée**, en notation CPC (espace) :
+    ``monprog.bas`` -> ``MONPROG BAS``, ``data.bin`` -> ``DATA BIN``.
+    """
+    base = os.path.basename(path)
+    stem, dot, ext = base.partition(".")
+    stem = stem.upper()[:8]
+    if not dot:
+        return stem
+    return f"{stem} {ext.upper()[:3]}"[:11].strip()
+
+
+# --- Glisser-déposer depuis l'explorateur Windows ------------------------- #
+def _register_drag_drop(root: "tk.Tk", on_drop) -> bool:
+    """Active le glisser-déposer de fichiers (explorateur Windows) sur la
+    fenêtre racine, via l'API RegisterDragHook (aucune dépendance externe).
+
+    ``on_drop(liste_de_chemin_absolu)`` est appelé dans la boucle tkinter.
+    Retourne ``False`` si l'OS ne le supporte pas (Linux/macOS).
+
+    NB: les ``argtypes`` sont **obligatoires** — sans eux ctypes tronque les
+    pointeurs (callback, HDROP) sur 32 bits en Windows 64-bit et le hook ne
+    reçoit jamais les dépôts.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        WM_DROPFILES = 0x0233
+        RHF_ALL = 15  # ENTER | LEAVE | OVER | DROP
+
+        WNDPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
+            ctypes.c_size_t, wintypes.LPARAM)
+
+        user32.RegisterDragHook.argtypes = [wintypes.HWND, WNDPROC,
+                                            wintypes.DWORD]
+        user32.RegisterDragHook.restype = wintypes.BOOL
+        shell32.DragQueryFileW.argtypes = [wintypes.HDROP, wintypes.DWORD,
+                                           wintypes.LPWSTR, wintypes.UINT]
+        shell32.DragQueryFileW.restype = wintypes.UINT
+        shell32.DragFinishW.argtypes = [wintypes.HDROP]
+
+        hwnd = wintypes.HWND(int(root.frame(), 0))
+
+        def _wndproc(h, msg, wp, lp):
+            if msg == WM_DROPFILES and wp:
+                count = shell32.DragQueryFileW(wp, 0xFFFFFFFF, None, 0)
+                buf = ctypes.create_unicode_buffer(32768)
+                paths = []
+                for i in range(count):
+                    if shell32.DragQueryFileW(wp, i, buf, 32768):
+                        paths.append(buf.value)
+                shell32.DragFinishW(wp)
+                if paths:
+                    root.after(0, lambda p=paths: on_drop(p))
+            return 0
+
+        # Le callback doit rester référencé (sinon collecté -> plantage).
+        globals()["_drag_drop_callback"] = WNDPROC(_wndproc)
+        if user32.RegisterDragHook(hwnd, globals()["_drag_drop_callback"],
+                                   RHF_ALL):
+            return True
+    except Exception:  # noqa: BLE001 — le DnD est un confort, pas critique
+        pass
+    return False
 
 
 class AddFileDialog:
@@ -65,7 +134,9 @@ class AddFileDialog:
         self.name = tk.StringVar(value=default_name)
         self.ftype = tk.StringVar(value="binary")
         self.load = tk.StringVar(value="0x4000")
-        self.fs = tk.StringVar(value="both")
+        # AMSDOS d'abord (émulateurs + longueurs exactes) ; « both » pour
+        # un disque lisible aussi par le vrai DOS/Gotek.
+        self.fs = tk.StringVar(value="amsdos")
 
         ttk.Label(frm, text="Nom sur la disquette (8.3):").grid(
             row=0, column=0, sticky="w", pady=2)
@@ -85,7 +156,7 @@ class AddFileDialog:
         ttk.Label(frm, text="Couche(s) d'écriture:").grid(
             row=3, column=0, sticky="w", pady=2)
         ttk.Combobox(frm, textvariable=self.fs, width=14, state="readonly",
-                     values=["both", "filer", "amsdos"]).grid(
+                     values=["amsdos", "both", "filer"]).grid(
             row=3, column=1, padx=6, pady=2)
 
         btns = ttk.Frame(frm)
@@ -137,6 +208,15 @@ class DskEditorApp:
 
         self.status = ttk.Label(root, text="Prêt.", relief="sunken", anchor="w")
         self.status.pack(side="bottom", fill="x")
+
+        # Glisser-déposer depuis l'explorateur Windows.
+        if _register_drag_drop(root, self._on_drop):
+            self._set_status(
+                "Prêt. Astuce : glissez des fichiers (explorateur) sur la "
+                "fenêtre — .dsk/.adf s'ouvrent (ou alimentent l'onglet Gotek), "
+                "les autres s'ajoutent à la disquette ouverte.")
+        elif sys.platform == "win32":
+            self._set_status("Prêt. (glisser-déposer non actif)")
 
     # ================================================================== #
     # Onglet Disquette
@@ -235,6 +315,9 @@ class DskEditorApp:
             filetypes=[("CPC DSK", "*.dsk *.adf"), ("Tous", "*.*")])
         if not path:
             return
+        self._open_path(path)
+
+    def _open_path(self, path: str) -> None:
         try:
             self.disk = ADFDisk.load(path)
         except (OSError, ADFError) as exc:
@@ -345,6 +428,9 @@ class DskEditorApp:
             title="Fichier local à copier sur la disquette")
         if not local:
             return
+        self._do_add_file(local)
+
+    def _do_add_file(self, local: str) -> None:
         dlg = AddFileDialog(self.root, _suggest_83(local))
         self.root.wait_window(dlg.win)
         if dlg.result is None:
@@ -371,9 +457,17 @@ class DskEditorApp:
         if f is None or self.disk is None:
             messagebox.showinfo("Extraction", "Sélectionnez un fichier à extraire.")
             return
+        # Nom de fichier proposé avec l'extension CPC conservée :
+        # « MONPROG BAS » -> « monprog.bas », sinon « nom.bin ».
+        name = f.name.strip()
+        if " " in name:
+            base, _, ext = name.rpartition(" ")
+            if ext in ("BAS", "BIN", "COM", "DOC", "SYS", "LIB", "B", "HEX"):
+                base = base.strip()
+                if base:
+                    name = f"{base.lower()}.{ext.lower()}"
         out = filedialog.asksaveasfilename(
-            title=f"Extraire {f.name} ({f.source})",
-            initialfile=f.name.split(".")[0].replace(" ", "_").lower() + ".bin")
+            title=f"Extraire {f.name} ({f.source})", initialfile=name)
         if not out:
             return
         try:
@@ -496,6 +590,9 @@ class DskEditorApp:
         paths = filedialog.askopenfilenames(
             title="Disquettes à mettre sur la clé",
             filetypes=[("CPC DSK", "*.dsk *.adf"), ("Tous", "*.*")])
+        self.gotek_add_paths(paths)
+
+    def gotek_add_paths(self, paths: List[str]) -> None:
         for p in paths:
             if p not in self._gotek_sources:
                 self._gotek_sources.append(p)
@@ -575,6 +672,38 @@ class DskEditorApp:
             messagebox.showerror("Échec de l'image FAT", str(exc))
             return
         self._set_status(f"Gotek: image FAT créée: {out_img}")
+
+    # ================================================================== #
+    # Glisser-déposer (explorateur Windows)
+    # ================================================================== #
+    def _on_drop(self, paths: List[str]) -> None:
+        """Fichiers déposés sur la fenêtre.
+
+        - ``.dsk``/``.adf`` : ouverts (onglet Disquette, rien d'ouvert) ou
+          ajoutés aux sources Gotek (onglet Gotek actif, ou disquette déjà
+          ouverte),
+        - autres fichiers : ajoutés à la disquette ouverte (dialogue 8.3).
+        """
+        disks = [p for p in paths if p.lower().endswith((".dsk", ".adf"))]
+        others = [p for p in paths if p not in disks]
+
+        if disks:
+            if self.notebook.index(self.notebook.select()) == 1:
+                self.gotek_add_paths(disks)
+                return
+            if self.disk is None:
+                self._open_path(disks[0])
+            else:
+                self.gotek_add_paths(disks)
+                self.notebook.select(self.tab_gotek)
+                return
+
+        for p in others:
+            if self.disk is None:
+                messagebox.showinfo(
+                    "Ajout", "Créez ou ouvrez d'abord une disquette.")
+                return
+            self._do_add_file(p)
 
     # ================================================================== #
     # Divers
