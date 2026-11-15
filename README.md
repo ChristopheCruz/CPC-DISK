@@ -97,8 +97,18 @@ Deux onglets :
 
 L'application peut être livrée sans Python ni installation :
 
-- **Windows** : depuis un PC Windows (Python 3.10+ requis pour la seule
-  génération), lancer `build_exe.bat` → produit `dist\cpc-dsk-gui.exe`.
+- **Windows (natif)** : depuis un PC Windows (Python 3.10+ requis pour la
+  seule génération), lancer `build_exe.bat` → produit `dist\cpc-dsk-gui.exe`.
+- **Windows (croix-compilation depuis WSL, testée)** : avec `wine` installé,
+  utiliser un CPython 64-bit portable « python-build-standalone » (pas
+  d'installateur requis, tkinter inclus) et y installer `pyinstaller`, puis :
+  ```bash
+  wine /chemin/cpython/python.exe -m pip install pyinstaller
+  # depuis la racine du projet, copié sur un chemin Linux NATIF (hors /mnt/c)
+  wine /chemin/cpython/python.exe -m PyInstaller --onefile --windowed --clean --name cpc-dsk-gui run_gui.py
+  ```
+  → produit `dist/cpc-dsk-gui.exe` (PE32+ x86-64). Le montage WSL `/mnt/c`
+  fait échouer l'étape « BeginUpdateResource » de PyInstaller sous wine.
 - **Linux / WSL** :
   ```bash
   python3 -m pip install pyinstaller
