@@ -8,8 +8,7 @@ Deux onglets :
   hexadécimale d'un fichier ou d'un secteur.
 - **Gotek (clé USB)** : préparer le répertoire à copier sur la clé USB du
   Gotek (patron de noms, sous-dossier, index de départ), le vérifier, et
-  créer une image FAT complète quand un outil `mformat`/`mkfs.fat` est
-  disponible.
+  créer une image FAT16 complète (rédacteur intégré, aucune dépendance).
 
 Lancement:
     python -m cpc_dsk.gui
@@ -81,9 +80,13 @@ def _register_drag_drop(root: "tk.Tk", on_drop) -> bool:
         WM_DROPFILES = 0x0233
         RHF_ALL = 15  # ENTER | LEAVE | OVER | DROP
 
+        # Signature exacte du DragHookProc (MSDN) :
+        #   LRESULT DragHookProc(HWND, UINT msg, DWORD_PTR dwData, DWORD_PTR dwParam)
+        # dwData/dwParam sont des pointeurs 64 bits sous x64 : c_size_t
+        # tronquerait le HDROP sur 32 bits et DragQueryFileW échouerait.
         WNDPROC = ctypes.WINFUNCTYPE(
             ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
-            ctypes.c_size_t, wintypes.LPARAM)
+            ctypes.c_void_p, ctypes.c_void_p)
 
         user32.RegisterDragHook.argtypes = [wintypes.HWND, WNDPROC,
                                             wintypes.DWORD]
@@ -93,7 +96,10 @@ def _register_drag_drop(root: "tk.Tk", on_drop) -> bool:
         shell32.DragQueryFileW.restype = wintypes.UINT
         shell32.DragFinishW.argtypes = [wintypes.HDROP]
 
-        hwnd = wintypes.HWND(int(root.frame(), 0))
+        # NB : root.frame() renvoie le cadre DÉCORATIF du gestionnaire de
+        # fenêtres (vide sous Windows -> int() levait -> DnD muet). Le HWND
+        # de la fenêtre Tk est winfo_id().
+        hwnd = wintypes.HWND(root.winfo_id())
 
         def _wndproc(h, msg, wp, lp):
             if msg == WM_DROPFILES and wp:
@@ -227,6 +233,8 @@ class DskEditorApp:
         ttk.Button(bar, text="Ouvrir…", command=self.open_disk).pack(side="left", padx=2)
         ttk.Button(bar, text="Nouveau", command=self.new_disk).pack(side="left", padx=2)
         ttk.Button(bar, text="Sauver", command=self.save_disk).pack(side="left", padx=2)
+        ttk.Button(bar, text="Enregistrer sous…",
+                   command=self.save_disk_as).pack(side="left", padx=2)
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=6)
         ttk.Label(bar, text="Secteur (piste sect):").pack(side="left")
         self.sector_var = tk.StringVar(value="0 0")
@@ -355,6 +363,30 @@ class DskEditorApp:
             return
         self.file_label.config(text=self.path, foreground="#000")
         self._set_status(f"Sauvegardé: {self.path}")
+
+    def save_disk_as(self) -> None:
+        """« Enregistrer sous » : sauvegarde la disquette sur un nouveau
+        chemin (devient le chemin courant — les « Sauver » suivants
+        écrivent sur ce nouveau fichier)."""
+        if self.disk is None:
+            messagebox.showinfo(
+                "Enregistrer sous", "Aucune disquette à sauvegarder.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Enregistrer la disquette sous…",
+            defaultextension=".dsk",
+            initialfile=os.path.basename(self.path) if self.path else None,
+            filetypes=[("CPC DSK", "*.dsk")])
+        if not path:
+            return
+        try:
+            self.disk.save(path)
+        except OSError as exc:
+            messagebox.showerror("Erreur d'enregistrement", str(exc))
+            return
+        self.path = path
+        self.file_label.config(text=path, foreground="#000")
+        self._set_status(f"Enregistré sous: {path}")
 
     def _persist(self) -> None:
         """Sauvegarde sur le chemin courant (ou propose un chemin)."""
@@ -655,10 +687,16 @@ class DskEditorApp:
         self._set_status(f"Gotek: {len(valid)} image(s) valide(s) dans {out}.")
 
     def gotek_fat_image(self) -> None:
-        if not self._gotek_check():
+        # Le répertoire « Sortie » n'est PAS requis ici (il ne sert qu'au
+        # générer/vérifier) : le dialogue de sauvegarde donne le .img.
+        if not self._gotek_sources:
+            messagebox.showinfo(
+                "Sources vides",
+                "Ajoutez au moins une disquette (.dsk/.adf) dans la liste.")
             return
         out_img = filedialog.asksaveasfilename(
-            title="Image FAT de la clé", defaultextension=".img",
+            title="Image FAT de la clé (32 Mo, à graver sur la clé USB)",
+            defaultextension=".img",
             filetypes=[("Image FAT", "*.img")])
         if not out_img:
             return

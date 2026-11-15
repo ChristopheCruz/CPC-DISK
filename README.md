@@ -35,8 +35,13 @@ AmstradCPC/
 
 - **Disk-Info** (256 o) : magic `EXTENDED CPC DSK File…`, nb de pistes `0x30`,
   nb de faces `0x31`, tableau des tailles de piste `0x34` (1 o/piste × 256).
-- **Blocs piste** : en-tête `Track-Info` (256 o, nb de secteurs `0x15`) +
-  données de secteurs contiguës.
+- **Blocs piste** : en-tête `Track-Info` (256 o : taille de secteur `0x14`,
+  nb de secteurs `0x15`, gap3 `0x16`, filler `0x17`, puis un enregistrement
+  de 8 o par secteur — cylindre, face, ID, code taille, st1, st2, longueur
+  LE16) + données de secteurs contiguës. WinAPE valide ces enregistrements
+  à l'ouverture (« invalid track sizes » sinon) ; les disques générés par
+  l'outil les reproduisent fidèlement et remplissent les secteurs vierges à
+  `0xE5`, comme après un formatage réel.
 - Géométrie type : 40 pistes × 1 face, bloc de 4864 o (9 secteurs × **512 o**)
   → fichier de 194 816 o, identique à une disquette CPC réelle.
 - **Variantes SAM / WinAPE tolérées** (vérifiées sur `test_disks/abbey.dsk`) :

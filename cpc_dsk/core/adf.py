@@ -37,10 +37,22 @@ Bloc piste
 ----------
 ::
 
-    Offset  Taille  Champ
-    0x00    12      "Track-Info\r\n"
-    0x15    1       nb de secteurs de la piste
-    0x100   ...     données des secteurs (contiguës, taille = taille_piste-256)
+    Offset        Taille  Champ
+    0x00          12      "Track-Info\r\n"
+    0x14          1       code taille secteur (128<<n : 0=128, 1=256, 2=512 o)
+    0x15          1       nb de secteurs de la piste
+    0x16          1       gap3
+    0x17          1       octet de remplissage (0xE5 après formatage)
+    0x18 + i×8    8       enregistrement secteur i : cylindre, face, ID,
+                          code taille, st1, st2, longueur LE16
+    0x100         ...     données des secteurs (contiguës, taille = taille_piste-256)
+
+WinAPE valide ces enregistrements à l'ouverture (avec la table des pistes
+@0x34 : pistes×faces entrées, valeur × 256 = taille de bloc, 0 = non
+formatée) ; une image sans enregistrements de secteurs est refusée (« invalid
+track sizes »). Les disques générés par cet outil reproduisent la structure
+des disques réels (IDs de secteurs C1 C6 C2 C7 C3 C8 C4 C9 C5, secteurs
+vierges remplis à 0xE5).
 
 La taille d'un bloc piste (donnée dans le tableau des pistes) est un multiple
 de 256 ; les données de secteurs occupent ``taille_piste - 256`` octets, soit
@@ -215,14 +227,35 @@ class ADFDisk:
         for t in range(tracks):
             header[EXT_TRACK_SIZE_TABLE_OFFSET + t] = track_byte
 
-        # Blocs piste
+        # Blocs piste — chaque en-tête Track-Info reproduit la structure des
+        # disquettes réelles (vérifiée sur greed.dsk/robot.dsk) :
+        #   0x14 = taille secteur (128<<n), 0x15 = nb de secteurs,
+        #   0x16 = gap3, 0x17 = octet de remplissage,
+        #   0x18 + i×8 = enregistrement secteur (c, h, r, n, st1, st2, len LE16).
+        # Sans ces enregistrements, WinAPE rejette l'image (« invalid track
+        # sizes »). Les secteurs vierges sont remplis à 0xE5, comme après
+        # formatage réel (le répertoire Filer vide est aussi 0xE5).
+        # Code de taille : 128<<n (128/256/512 -> 0/1/2).
+        size_shift = (sector_size // 128).bit_length() - 1
+        sec_ids_9 = (0xC1, 0xC6, 0xC2, 0xC7, 0xC3, 0xC8, 0xC4, 0xC9, 0xC5)
         blocks = bytearray()
-        for _ in range(tracks):
+        for t in range(tracks):
             ti = bytearray(TRACK_INFO_SIZE)
             ti[0:len(TRACK_INFO_MAGIC)] = TRACK_INFO_MAGIC
+            ti[0x14] = size_shift
             ti[TRACK_INFO_NUM_SECTORS_OFFSET] = sectors
+            ti[0x16] = 0x52  # gap3 (valeur observée sur greed.dsk)
+            ti[0x17] = 0xE5  # octet de remplissage
+            for i in range(sectors):
+                rec = bytearray(8)
+                rec[0] = t
+                rec[2] = (sec_ids_9[i] if i < len(sec_ids_9) else 0xC0 + i + 1)
+                rec[3] = size_shift
+                rec[6] = sector_size & 0xFF
+                rec[7] = (sector_size >> 8) & 0xFF
+                ti[0x18 + i * 8: 0x18 + i * 8 + 8] = rec
             blocks += ti
-            blocks += bytes(track_data_size)  # secteurs à zéro
+            blocks += b"\xE5" * track_data_size  # secteurs formatés (remplis)
 
         return cls(bytes(header) + bytes(blocks), creator=creator)
 

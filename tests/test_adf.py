@@ -45,7 +45,7 @@ def test_sector_roundtrip():
     payload = bytes(range(256)) * 2  # 512 o
     d.set_sector(3, 5, payload)
     assert d.get_sector(3, 5) == payload
-    assert d.get_sector(3, 6) == bytes(512)
+    assert d.get_sector(3, 6) == b"\xE5" * 512  # vierge = remplissage formatage
 
 
 def test_sector_size_is_512():
@@ -76,7 +76,7 @@ def test_sam_variant_zero_padded_table_and_trailer(tmp_path):
     # La traînée est conservée telle quelle.
     assert bytes(d2._raw)[d2.track_offsets[-1] + 4864:] == trailer
     # Les données de secteurs restent accessibles.
-    assert d2.get_sector(0, 0) == bytes(512)
+    assert d2.get_sector(0, 0) == b"\xE5" * 512
     # Sauvegarde : fichier byte-identique (traînée comprise).
     p = os.path.join(tmp_path, "sam.dsk")
     d2.save(p)
@@ -88,6 +88,43 @@ def test_truncated_file_still_raises():
     raw = bytes(d._raw)[:-1000]  # coupé au milieu de la dernière piste
     with pytest.raises(ADFError):
         ADFDisk(raw)
+
+
+def test_new_blank_track_info_matches_real_disks():
+    """Track-Info de new_blank : structure des disquettes réelles
+    (ce que WinAPE valide à l'ouverture — « invalid track sizes » sinon)."""
+    d = ADFDisk.new_blank()
+    raw = d._raw
+    for t in (0, 1, 39):
+        off = d.track_offsets[t]
+        ti = raw[off:off + 256]
+        assert ti[:12] == b"Track-Info\r\n"
+        assert ti[0x14] == 2          # taille de secteur 128<<2 = 512 o
+        assert ti[0x15] == 9          # 9 secteurs
+        assert ti[0x17] == 0xE5       # octet de remplissage
+        for i in range(9):
+            rec = ti[0x18 + i * 8: 0x18 + i * 8 + 8]
+            assert rec[0] == t        # cylindre
+            assert rec[3] == 2        # code taille
+            assert rec[6] | (rec[7] << 8) == 512
+    # Ordre physique réel des IDs de secteurs (pistes réelles : C1 C6 C2 …).
+    ti0 = raw[d.track_offsets[0]: d.track_offsets[0] + 256]
+    assert [ti0[0x18 + i * 8 + 2] for i in range(9)] == [
+        0xC1, 0xC6, 0xC2, 0xC7, 0xC3, 0xC8, 0xC4, 0xC9, 0xC5]
+    # Piste vierge remplie à 0xE5 (formatage réel, répertoire Filer compris).
+    assert d.get_track_data(0) == b"\xE5" * 4608
+
+
+def test_new_blank_track_info_byte_equal_greed():
+    """Track-Info[0] byte-par-byte identique à greed.dsk (référence réelle)."""
+    ref = os.path.join(os.path.dirname(__file__), "..", "test_disks",
+                       "greed.dsk")
+    if not os.path.exists(ref):
+        pytest.skip("greed.dsk absent")
+    real = open(ref, "rb").read()
+    gen = ADFDisk.new_blank()
+    off = gen.track_offsets[0]
+    assert real[256:256 + 256] == bytes(gen._raw[off:off + 256])
 
 
 # --- Tests optionnels sur de vraies disquettes (si téléchargées) ---

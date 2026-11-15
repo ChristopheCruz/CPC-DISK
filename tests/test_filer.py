@@ -53,8 +53,8 @@ def test_filer_directory_entry_layout(tmp_path):
     # Queue : ceil(128/1024) = 1 octet de compteur, premier = 0x02.
     assert e[16] == 0x02
     assert e[17:32] == b"\x00" * 15
-    # Entrées suivantes vides (zéro sur disquette vierge).
-    assert sec[DIR_ENTRY_SIZE:] == b"\x00" * (512 - DIR_ENTRY_SIZE)
+    # Entrées suivantes vides (0xE5 : disquette formatée).
+    assert sec[DIR_ENTRY_SIZE:] == b"\xE5" * (512 - DIR_ENTRY_SIZE)
     # Données au début du paquet : secteur 1 de la piste 0.
     assert d.get_sector(0, 1)[:100] == b"x" * 100
 
