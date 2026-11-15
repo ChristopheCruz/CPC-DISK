@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.png" width="140" alt="CPC Disk Editor">
+
 
 ```
  ██████╗██████╗  ██████╗    ██████╗ ██╗███████╗██╗  ██╗
@@ -17,6 +17,8 @@ Ready
 
 **CPC `.dsk` disk image editor, with USB key preparation for Gotek readers.**
 A "CPC screen"-looking interface, in pure Python, with no external dependencies.
+
+<img src="docs/logo.png" width="140" alt="CPC Disk Editor">
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-000080?style=flat-square&labelColor=FFFF00&logo=python&logoColor=000080)
 ![GUI](https://img.shields.io/badge/GUI-tkinter-000080?style=flat-square&labelColor=00FFFF)
