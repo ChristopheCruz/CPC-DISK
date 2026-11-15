@@ -25,6 +25,10 @@ htmlcov/
 *.spec
 *.exe
 
+# Sauvegardes / outils locaux (émulateurs, backups)
+*.bak
+cpc_tools/
+
 # Images disque générées (à ne pas committer)
 *.dsk
 *.adf

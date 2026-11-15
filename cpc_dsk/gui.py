@@ -1,14 +1,24 @@
-"""Interface graphique (tkinter) de cpc_dsk.
+"""Interface graphique (tkinter) de cpc_dsk — habillage « écran CPC » pixel art.
 
-Deux onglets :
+Deux onglets (F1 / F2) :
 
 - **Disquette (.dsk)** : ouvrir / créer / sauvegarder une image, lister les
   fichiers (couches Filer et AMSDOS), ajouter un fichier local, extraire un
   fichier vers le disque local, supprimer un fichier, inspection
-  hexadécimale d'un fichier ou d'un secteur.
+  hexadécimale d'un fichier ou d'un secteur, carte des secteurs cliquable.
 - **Gotek (clé USB)** : préparer le répertoire à copier sur la clé USB du
   Gotek (patron de noms, sous-dossier, index de départ), le vérifier, et
   créer une image FAT16 complète (rédacteur intégré, aucune dépendance).
+
+Habillage :
+- palette du firmware CPC (bleu / jaune vif / cyan) ou moniteur vert GT65
+  (bouton « Moniteur » ou F3) ;
+- polices pixel « Press Start 2P » et « VT323 » (licence OFL) chargées depuis
+  le dossier ``fonts/`` voisin de ce fichier (repli automatique sur une
+  police à chasse fixe si elles sont absentes).
+
+Raccourcis : F1/F2 onglets, F3 moniteur, Ctrl+O ouvrir, Ctrl+N nouveau,
+Ctrl+S sauver.
 
 Lancement:
     python -m cpc_dsk.gui
@@ -18,11 +28,13 @@ from __future__ import annotations
 
 import os
 import sys
+import unicodedata
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from typing import List, Optional
+from tkinter import filedialog, ttk
+from tkinter import font as tkfont
+from types import SimpleNamespace
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from cpc_dsk.cli import hexdump
 from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import CpcError, CpcFile, CpcFilesystem, FT_BASIC, FT_BINARY
 from cpc_dsk.core.gotek import (
@@ -35,6 +47,61 @@ from cpc_dsk.core.gotek import (
 )
 
 
+# ====================================================================== #
+# Thèmes (palette du firmware CPC / moniteur vert GT65)
+# ====================================================================== #
+THEMES: Dict[str, Dict[str, str]] = {
+    "couleur": dict(
+        frame="#0000FF", paper="#000080", panel="#000040", ink="#FFFF00",
+        acc="#00FFFF", hi="#FFFFFF", warm="#FF8000", dim="#2828A8",
+        btn="#00FFFF", btn_ink="#000080", pri="#FFFF00", pri_ink="#000080",
+        danger="#FF0000", danger_ink="#000000",
+        r="#FF0000", g="#00FF00", b="#00A0FF"),
+    "vert": dict(
+        frame="#0B3D16", paper="#021A07", panel="#010D04", ink="#33FF66",
+        acc="#9CFFB4", hi="#E0FFE8", warm="#1FA344", dim="#0F4A1E",
+        btn="#9CFFB4", btn_ink="#021A07", pri="#33FF66", pri_ink="#021A07",
+        danger="#E0FFE8", danger_ink="#021A07",
+        r="#33FF66", g="#9CFFB4", b="#E0FFE8"),
+}
+
+# Icônes 8×8 (X = pixel allumé), dessinées à l'échelle 2.
+ICONS: Dict[str, Sequence[str]] = {
+    "open": ("........", "XXX.....", "XXXXXXXX", "XXXXXXXX",
+             "XXXXXXXX", "XXXXXXXX", "XXXXXXXX", "........"),
+    "new": ("...XX...", "...XX...", "...XX...", "XXXXXXXX",
+            "XXXXXXXX", "...XX...", "...XX...", "...XX..."),
+    "save": ("XXXXXXX.", "XX...XXX", "XX...XXX", "XXXXXXXX",
+             "XXXXXXXX", "XX....XX", "XX....XX", "XXXXXXXX"),
+    "eye": ("........", "..XXXX..", ".XX..XX.", "XX.XX.XX",
+            "XX.XX.XX", ".XX..XX.", "..XXXX..", "........"),
+    "extract": ("...XX...", "...XX...", "...XX...", ".XXXXXX.",
+                "..XXXX..", "...XX...", "X......X", "XXXXXXXX"),
+    "trash": ("..XXXX..", "XXXXXXXX", "........", ".XXXXXX.",
+              ".X.XX.X.", ".X.XX.X.", ".X.XX.X.", ".XXXXXX."),
+    "up": ("........", "...XX...", "..XXXX..", ".XXXXXX.",
+           "XXXXXXXX", "...XX...", "...XX...", "........"),
+    "down": ("........", "...XX...", "...XX...", "XXXXXXXX",
+             ".XXXXXX.", "..XXXX..", "...XX...", "........"),
+}
+
+# Disquette 3" en pixel art (grille 24×28) : (x, y, w, h, couleur du thème).
+FLOPPY = (
+    (1, 0, 22, 28, "dim"), (0, 1, 24, 26, "dim"),
+    (7, 0, 10, 9, "hi"), (9, 2, 3, 5, "panel"),
+    (3, 13, 18, 13, "ink"),
+    (5, 16, 14, 1, "paper"), (5, 19, 10, 1, "paper"), (5, 22, 12, 1, "paper"),
+    (1, 2, 1, 2, "acc"), (22, 2, 1, 2, "acc"),
+)
+
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+PIXEL_TITLE = "Press Start 2P"
+PIXEL_BODY = "VT323"
+
+
+# ====================================================================== #
+# Utilitaires
+# ====================================================================== #
 def _fmt_size(n: int) -> str:
     if n >= 1024 * 1024:
         return f"{n / (1024 * 1024):.1f} Mo"
@@ -57,17 +124,72 @@ def _suggest_83(path: str) -> str:
     return f"{stem} {ext.upper()[:3]}"[:11].strip()
 
 
+def _mix(c1: str, c2: str, a: float) -> str:
+    """Mélange deux couleurs #RRGGBB (a = part de c2)."""
+    x = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    y = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(p + (q - p) * a):02X}" for p, q in zip(x, y))
+
+
+def _hex_rows(data: bytes):
+    """Lignes (offset, octets, ascii) d'un dump hexadécimal 16 octets/ligne."""
+    for i in range(0, len(data), 16):
+        chunk = data[i:i + 16]
+        yield (f"{i:08X}",
+               " ".join(f"{b:02X}" for b in chunk).ljust(47),
+               "".join(chr(b) if 32 <= b < 127 else "." for b in chunk))
+
+
+def _probe_geometry(disk) -> Tuple[int, int]:
+    """(pistes, secteurs par piste) en sondant ``get_sector``."""
+    def ok(t: int, s: int) -> bool:
+        try:
+            return bool(disk.get_sector(t, s))
+        except Exception:  # noqa: BLE001 — hors géométrie
+            return False
+
+    tracks = 0
+    while tracks < 200 and ok(tracks, 0):
+        tracks += 1
+    sectors = 0
+    while tracks and sectors < 64 and ok(0, sectors):
+        sectors += 1
+    return tracks, sectors
+
+
+def _load_private_fonts() -> None:
+    """Rend les .ttf du dossier ``fonts/`` visibles par Tk (Windows).
+
+    Doit être appelé AVANT la création de la fenêtre Tk.
+    """
+    if sys.platform != "win32" or not os.path.isdir(FONT_DIR):
+        return
+    try:
+        import ctypes
+        gdi32 = ctypes.windll.gdi32
+        gdi32.AddFontResourceExW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint,
+                                             ctypes.c_void_p]
+        FR_PRIVATE = 0x10
+        for name in os.listdir(FONT_DIR):
+            if name.lower().endswith((".ttf", ".otf")):
+                gdi32.AddFontResourceExW(os.path.join(FONT_DIR, name),
+                                         FR_PRIVATE, None)
+    except Exception:  # noqa: BLE001 — confort visuel, pas critique
+        pass
+
+
 # --- Glisser-déposer depuis l'explorateur Windows ------------------------- #
 def _register_drag_drop(root: "tk.Tk", on_drop) -> bool:
     """Active le glisser-déposer de fichiers (explorateur Windows) sur la
-    fenêtre racine, via l'API RegisterDragHook (aucune dépendance externe).
+    fenêtre racine, sans dépendance externe.
 
-    ``on_drop(liste_de_chemin_absolu)`` est appelé dans la boucle tkinter.
+    Méthode : ``DragAcceptFiles`` sur la fenêtre Tk puis sous-classement de
+    sa procédure de fenêtre (``SetWindowLongPtrW``) pour intercepter
+    ``WM_DROPFILES``. Les messages non traités repartent vers Tk via
+    ``CallWindowProcW``.
+
+    ``on_drop(liste_de_chemins)`` est appelé dans la boucle tkinter.
     Retourne ``False`` si l'OS ne le supporte pas (Linux/macOS).
-
-    NB: les ``argtypes`` sont **obligatoires** — sans eux ctypes tronque les
-    pointeurs (callback, HDROP) sur 32 bits en Windows 64-bit et le hook ne
-    reçoit jamais les dépôts.
     """
     if sys.platform != "win32":
         return False
@@ -78,64 +200,282 @@ def _register_drag_drop(root: "tk.Tk", on_drop) -> bool:
         user32 = ctypes.windll.user32
         shell32 = ctypes.windll.shell32
         WM_DROPFILES = 0x0233
-        RHF_ALL = 15  # ENTER | LEAVE | OVER | DROP
+        GWLP_WNDPROC = -4
+        LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
 
-        # Signature exacte du DragHookProc (MSDN) :
-        #   LRESULT DragHookProc(HWND, UINT msg, DWORD_PTR dwData, DWORD_PTR dwParam)
-        # dwData/dwParam sont des pointeurs 64 bits sous x64 : c_size_t
-        # tronquerait le HDROP sur 32 bits et DragQueryFileW échouerait.
-        WNDPROC = ctypes.WINFUNCTYPE(
-            ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
-            ctypes.c_void_p, ctypes.c_void_p)
-
-        user32.RegisterDragHook.argtypes = [wintypes.HWND, WNDPROC,
-                                            wintypes.DWORD]
-        user32.RegisterDragHook.restype = wintypes.BOOL
-        shell32.DragQueryFileW.argtypes = [wintypes.HDROP, wintypes.DWORD,
+        if ctypes.sizeof(ctypes.c_void_p) == 8:
+            set_wl = user32.SetWindowLongPtrW
+        else:
+            set_wl = user32.SetWindowLongW
+        set_wl.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        set_wl.restype = ctypes.c_void_p
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND,
+                                           wintypes.UINT, wintypes.WPARAM,
+                                           wintypes.LPARAM]
+        user32.CallWindowProcW.restype = LRESULT
+        shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+        shell32.DragQueryFileW.argtypes = [ctypes.c_void_p, wintypes.UINT,
                                            wintypes.LPWSTR, wintypes.UINT]
         shell32.DragQueryFileW.restype = wintypes.UINT
-        shell32.DragFinishW.argtypes = [wintypes.HDROP]
+        shell32.DragFinish.argtypes = [ctypes.c_void_p]
 
-        # NB : root.frame() renvoie le cadre DÉCORATIF du gestionnaire de
-        # fenêtres (vide sous Windows -> int() levait -> DnD muet). Le HWND
-        # de la fenêtre Tk est winfo_id().
-        hwnd = wintypes.HWND(root.winfo_id())
+        root.update_idletasks()
+        hwnd = root.winfo_id()
+
+        # Processus élevé (admin) : laisser passer les dépôts de l'explorateur.
+        try:
+            user32.ChangeWindowMessageFilterEx.argtypes = [
+                wintypes.HWND, wintypes.UINT, wintypes.DWORD, ctypes.c_void_p]
+            for msg in (WM_DROPFILES, 0x004A, 0x0049):
+                user32.ChangeWindowMessageFilterEx(hwnd, msg, 1, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+        old_proc = [None]
 
         def _wndproc(h, msg, wp, lp):
-            if msg == WM_DROPFILES and wp:
+            if msg == WM_DROPFILES:
                 count = shell32.DragQueryFileW(wp, 0xFFFFFFFF, None, 0)
                 buf = ctypes.create_unicode_buffer(32768)
                 paths = []
                 for i in range(count):
                     if shell32.DragQueryFileW(wp, i, buf, 32768):
                         paths.append(buf.value)
-                shell32.DragFinishW(wp)
+                shell32.DragFinish(wp)
                 if paths:
                     root.after(0, lambda p=paths: on_drop(p))
-            return 0
+                return 0
+            return user32.CallWindowProcW(old_proc[0], h, msg, wp, lp)
 
+        callback = WNDPROC(_wndproc)
         # Le callback doit rester référencé (sinon collecté -> plantage).
-        globals()["_drag_drop_callback"] = WNDPROC(_wndproc)
-        if user32.RegisterDragHook(hwnd, globals()["_drag_drop_callback"],
-                                   RHF_ALL):
-            return True
+        globals()["_drag_drop_callback"] = callback
+        old_proc[0] = set_wl(hwnd, GWLP_WNDPROC,
+                             ctypes.cast(callback, ctypes.c_void_p))
+        if not old_proc[0]:
+            return False
+        shell32.DragAcceptFiles(hwnd, True)
+        return True
     except Exception:  # noqa: BLE001 — le DnD est un confort, pas critique
-        pass
-    return False
+        return False
+
+
+# ====================================================================== #
+# Widgets pixel art
+# ====================================================================== #
+class PixelButton(tk.Canvas):
+    """Bouton à relief 4 px, coins crantés, icône 8×8 optionnelle."""
+
+    KINDS = {"normal": ("btn", "btn_ink"), "primary": ("pri", "pri_ink"),
+             "danger": ("danger", "danger_ink")}
+
+    def __init__(self, master, app: "DskEditorApp", text: str = "",
+                 command=None, kind: str = "normal", icon: Optional[str] = None,
+                 padx: int = 16):
+        t = app.t
+        bg_key, fg_key = self.KINDS[kind]
+        self._bg, self._fg = getattr(t, bg_key), getattr(t, fg_key)
+        self._text = app.caps(text)
+        self._icon = icon
+        self._cmd = command
+        self._font = app.f_btn
+        tw = self._font.measure(self._text) if self._text else 0
+        iw = 16 if icon else 0
+        gap = 10 if (icon and self._text) else 0
+        self._content_w = tw + iw + gap
+        self._bw = self._content_w + 2 * padx + 8
+        self._bh = max(42, self._font.metrics("linespace") + 24)
+        super().__init__(master, width=self._bw, height=self._bh,
+                         bg=master.cget("bg"), highlightthickness=0, bd=0,
+                         cursor="hand2", takefocus=1)
+        self._hover = self._press = self._focus = False
+        self.bind("<Enter>", lambda e: self._set(hover=True))
+        self.bind("<Leave>", lambda e: self._set(hover=False, press=False))
+        self.bind("<ButtonPress-1>", lambda e: self._set(press=True))
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<FocusIn>", lambda e: self._set(focus=True))
+        self.bind("<FocusOut>", lambda e: self._set(focus=False))
+        self.bind("<space>", lambda e: self.invoke())
+        self.bind("<Return>", lambda e: self.invoke())
+        self._draw()
+
+    def invoke(self) -> None:
+        if self._cmd:
+            self._cmd()
+
+    def _release(self, event) -> None:
+        inside = 0 <= event.x < self._bw and 0 <= event.y < self._bh
+        was = self._press
+        self._set(press=False)
+        if was and inside:
+            self.invoke()
+
+    def _set(self, **kw) -> None:
+        for k, v in kw.items():
+            setattr(self, "_" + k, v)
+        self._draw()
+
+    def _draw(self) -> None:
+        w, h, n = self._bw, self._bh, 4
+        self.delete("all")
+        body = _mix(self._bg, "#FFFFFF", 0.15) if self._hover else self._bg
+        light, dark = _mix(body, "#FFFFFF", 0.55), _mix(body, "#000000", 0.35)
+        tl, br = (dark, _mix(body, "#FFFFFF", 0.35)) if self._press else (light, dark)
+        self.create_polygon(0, n, n, n, n, 0, w - n, 0, w - n, n, w, n,
+                            w, h - n, w - n, h - n, w - n, h, n, h, n, h - n,
+                            0, h - n, fill=body, outline="")
+        self.create_rectangle(n, 0, w - n, n, fill=tl, outline="")
+        self.create_rectangle(0, n, n, h - n, fill=tl, outline="")
+        self.create_rectangle(n, h - n, w - n, h, fill=br, outline="")
+        self.create_rectangle(w - n, n, w, h - n, fill=br, outline="")
+        off = 2 if self._press else 0
+        x = (w - self._content_w) / 2 + off
+        cy = h / 2 + off
+        if self._icon:
+            for r, line in enumerate(ICONS[self._icon]):
+                for c, ch in enumerate(line):
+                    if ch == "X":
+                        px, py = x + c * 2, cy - 8 + r * 2
+                        self.create_rectangle(px, py, px + 2, py + 2,
+                                              fill=self._fg, outline="")
+            x += 16 + (10 if self._text else 0)
+        if self._text:
+            self.create_text(x, cy + 1, text=self._text, anchor="w",
+                             font=self._font, fill=self._fg)
+        if self._focus:
+            self.create_rectangle(7, 7, w - 7, h - 7, outline=self._fg,
+                                  dash=(2, 2))
+
+
+class Panel(tk.Frame):
+    """Cadre bordé 4 px avec bandeau de titre en vidéo inverse."""
+
+    def __init__(self, master, app: "DskEditorApp", title: str,
+                 accent: Optional[str] = None):
+        t = app.t
+        accent = accent or t.acc
+        super().__init__(master, bg=accent, padx=4, pady=4)
+        self.head = tk.Label(self, text=app.caps(title), bg=accent, fg=t.paper,
+                             font=app.f_head, anchor="w", padx=8, pady=6)
+        self.head.pack(fill="x")
+        self.body = tk.Frame(self, bg=t.panel)
+        self.body.pack(fill="both", expand=True)
+
+
+class Segmented(tk.Frame):
+    """Choix exclusif en boutons pixel (remplace un Combobox)."""
+
+    def __init__(self, master, app: "DskEditorApp", var: tk.StringVar,
+                 options: Sequence[Tuple[str, str]]):
+        super().__init__(master, bg=master.cget("bg"))
+        self.app, self.var = app, var
+        self._labels: List[Tuple[str, tk.Label]] = []
+        for value, label in options:
+            lbl = tk.Label(self, text=app.caps(label), font=app.f_head, padx=12,
+                           pady=10, cursor="hand2", highlightthickness=3,
+                           takefocus=1)
+            lbl.pack(side="left", padx=(0, 6))
+            lbl.bind("<Button-1>", lambda e, v=value: var.set(v))
+            lbl.bind("<space>", lambda e, v=value: var.set(v))
+            self._labels.append((value, lbl))
+        self._trace = var.trace_add("write", lambda *a: self._paint())
+        self.bind("<Destroy>", self._untrace, add="+")
+        self._paint()
+
+    def _untrace(self, _e=None) -> None:
+        try:
+            self.var.trace_remove("write", self._trace)
+        except (tk.TclError, ValueError):
+            pass
+
+    def _paint(self) -> None:
+        t = self.app.t
+        for value, lbl in self._labels:
+            on = value == self.var.get()
+            try:
+                lbl.config(bg=t.ink if on else t.panel,
+                           fg=t.paper if on else t.acc,
+                           highlightbackground=t.ink if on else t.acc,
+                           highlightcolor=t.hi)
+            except tk.TclError:
+                pass
+
+
+# ====================================================================== #
+# Boîtes de dialogue
+# ====================================================================== #
+class PixelDialog:
+    """Boîte modale (info / erreur / question) dans le style CPC."""
+
+    def __init__(self, app: "DskEditorApp", title: str, message: str,
+                 kind: str = "info",
+                 buttons: Sequence[Tuple[str, object, str]] = (("OK", True, "primary"),)):
+        t = app.t
+        self.result = None
+        accent = {"info": t.acc, "error": t.danger, "ask": t.ink,
+                  "danger": t.danger}.get(kind, t.acc)
+        head_fg = t.danger_ink if kind in ("error", "danger") else t.paper
+        self.win = win = tk.Toplevel(app.root)
+        win.title(title)
+        win.configure(bg=accent)
+        win.transient(app.root)
+        win.resizable(False, False)
+        head = tk.Label(win, text=app.caps(title), bg=accent, fg=head_fg,
+                        font=app.f_head, anchor="w", padx=12, pady=10)
+        head.pack(fill="x", padx=4, pady=(4, 0))
+        body = tk.Frame(win, bg=t.panel, padx=18, pady=16)
+        body.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+        tk.Label(body, text=message, bg=t.panel, fg=t.hi, font=app.f_body,
+                 justify="left", wraplength=480, anchor="w").pack(
+            fill="x", pady=(0, 16))
+        row = tk.Frame(body, bg=t.panel)
+        row.pack(anchor="e")
+        first = None
+        for label, value, bkind in buttons:
+            b = PixelButton(row, app, label, kind=bkind,
+                            command=lambda v=value: self._close(v))
+            b.pack(side="left", padx=(8, 0))
+            first = first or b
+        win.bind("<Escape>", lambda e: self._close(None))
+        win.protocol("WM_DELETE_WINDOW", lambda: self._close(None))
+        _center(win, app.root)
+        win.grab_set()
+        if first is not None:
+            first.focus_set()
+        app.root.wait_window(win)
+
+    def _close(self, value) -> None:
+        self.result = value
+        self.win.destroy()
+
+
+def _center(win: tk.Toplevel, root: tk.Misc) -> None:
+    win.update_idletasks()
+    x = root.winfo_rootx() + (root.winfo_width() - win.winfo_reqwidth()) // 2
+    y = root.winfo_rooty() + (root.winfo_height() - win.winfo_reqheight()) // 3
+    win.geometry(f"+{max(0, x)}+{max(0, y)}")
 
 
 class AddFileDialog:
-    """Petite fenêtre modale : nom 8.3, type, adresse de chargement, couche."""
+    """Fenêtre modale : nom 8.3, type, adresse de chargement, couche."""
 
-    def __init__(self, master, default_name: str):
+    def __init__(self, app: "DskEditorApp", default_name: str):
+        t = app.t
+        self.app = app
         self.result: Optional[dict] = None
-        self.win = tk.Toplevel(master)
-        self.win.title("Ajouter un fichier sur la disquette")
-        self.win.transient(master)
-        self.win.resizable(False, False)
+        self.win = win = tk.Toplevel(app.root)
+        win.title("Ajouter un fichier sur la disquette")
+        win.configure(bg=t.acc)
+        win.transient(app.root)
+        win.resizable(False, False)
 
-        frm = ttk.Frame(self.win, padding=12)
-        frm.grid(sticky="nsew")
+        tk.Label(win, text="AJOUTER UN FICHIER", bg=t.acc, fg=t.paper,
+                 font=app.f_head, anchor="w", padx=12, pady=10).pack(
+            fill="x", padx=4, pady=(4, 0))
+        frm = tk.Frame(win, bg=t.panel, padx=18, pady=16)
+        frm.pack(fill="both", expand=True, padx=4, pady=(0, 4))
 
         self.name = tk.StringVar(value=default_name)
         self.ftype = tk.StringVar(value="binary")
@@ -144,43 +484,47 @@ class AddFileDialog:
         # « both » pour un disque lisible aussi par les émulateurs AMSDOS.
         self.fs = tk.StringVar(value="filer")
 
-        ttk.Label(frm, text="Nom sur la disquette (8.3):").grid(
-            row=0, column=0, sticky="w", pady=2)
-        ttk.Entry(frm, textvariable=self.name, width=16).grid(
-            row=0, column=1, padx=6, pady=2)
+        def label(text, row):
+            tk.Label(frm, text=text, bg=t.panel, fg=t.acc, font=app.f_body,
+                     anchor="w").grid(row=row, column=0, sticky="w",
+                                      pady=6, padx=(0, 14))
 
-        ttk.Label(frm, text="Type:").grid(row=1, column=0, sticky="w", pady=2)
-        ttk.Combobox(frm, textvariable=self.ftype, width=14, state="readonly",
-                     values=["basic", "binary"]).grid(
-            row=1, column=1, padx=6, pady=2)
+        label("Nom sur la disquette (8.3)", 0)
+        name_entry = app.entry(frm, self.name, width=14)
+        name_entry.grid(row=0, column=1, sticky="w", pady=6)
+        label("Type", 1)
+        Segmented(frm, app, self.ftype,
+                  [("basic", "Basic"), ("binary", "Binaire")]).grid(
+            row=1, column=1, sticky="w", pady=6)
+        label("Adresse de chargement", 2)
+        app.entry(frm, self.load, width=10).grid(row=2, column=1, sticky="w",
+                                                 pady=6)
+        label("Couche(s) d'écriture", 3)
+        Segmented(frm, app, self.fs,
+                  [("filer", "Filer"), ("both", "Les deux"),
+                   ("amsdos", "AMSDOS")]).grid(row=3, column=1, sticky="w",
+                                               pady=6)
 
-        ttk.Label(frm, text="Adresse de chargement:").grid(
-            row=2, column=0, sticky="w", pady=2)
-        ttk.Entry(frm, textvariable=self.load, width=16).grid(
-            row=2, column=1, padx=6, pady=2)
-
-        ttk.Label(frm, text="Couche(s) d'écriture:").grid(
-            row=3, column=0, sticky="w", pady=2)
-        ttk.Combobox(frm, textvariable=self.fs, width=14, state="readonly",
-                     values=["filer", "both", "amsdos"]).grid(
-            row=3, column=1, padx=6, pady=2)
-
-        btns = ttk.Frame(frm)
-        btns.grid(row=4, column=0, columnspan=2, pady=(10, 0))
-        ttk.Button(btns, text="OK", command=self._ok).pack(side="left", padx=4)
-        ttk.Button(btns, text="Annuler",
-                   command=self.win.destroy).pack(side="left", padx=4)
-        self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
-        self.win.grab_set()
+        btns = tk.Frame(frm, bg=t.panel)
+        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(16, 0))
+        PixelButton(btns, app, "Annuler", command=win.destroy).pack(
+            side="left", padx=(0, 8))
+        PixelButton(btns, app, "OK", kind="primary", command=self._ok).pack(
+            side="left")
+        win.bind("<Return>", lambda e: self._ok())
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        _center(win, app.root)
+        win.grab_set()
+        name_entry.focus_set()
+        name_entry.select_range(0, "end")
 
     def _ok(self) -> None:
         try:
             load = int(self.load.get(), 0)
         except ValueError:
-            messagebox.showerror(
-                "Adresse invalide",
-                "Adresse de chargement invalide (ex: 0x4000).",
-                parent=self.win)
+            self.app.error("Adresse invalide",
+                           "Adresse de chargement invalide (ex: 0x4000).")
             return
         self.result = {
             "name": self.name.get(),
@@ -191,119 +535,505 @@ class AddFileDialog:
         self.win.destroy()
 
 
+# ====================================================================== #
+# Application
+# ====================================================================== #
 class DskEditorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Éditeur de disquettes CPC (.dsk) & Gotek")
-        self.root.geometry("1000x640")
+        self.root.title("CPC Disk Editor — Disquettes .dsk & Gotek")
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        w, h = min(1440, sw - 60), min(960, sh - 90)
+        self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
+        self.root.minsize(min(1120, sw - 40), min(740, sh - 60))
 
+        # --- état (survit aux changements de thème) ---
         self.disk: Optional[ADFDisk] = None
         self.path: Optional[str] = None
         self._files: List[CpcFile] = []
         self._gotek_sources: List[str] = []
+        self._geom: Tuple[int, int] = (0, 0)
+        self._sec_data: List[List[bytes]] = []
+        self._sec_used: List[List[bool]] = []
+        self._file_secs: Set[Tuple[int, int]] = set()
+        self._cursor: Optional[Tuple[int, int]] = None
+        self._last_hex: Optional[Tuple[bytes, str]] = None
+        self._gtk_last: List[Tuple[str, str]] = []
+        self._gtk_progress = 0.0
+        self._status_text = "Prêt."
+        self._tab = 0
+        self._theme_name = "couleur"
+        self._blink_id: Optional[str] = None
 
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill="both", expand=True)
-        self.tab_disk = ttk.Frame(self.notebook)
-        self.tab_gotek = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_disk, text=" Disquette (.dsk) ")
-        self.notebook.add(self.tab_gotek, text=" Gotek (clé USB) ")
+        self.sector_var = tk.StringVar(value="0 0")
+        self.gtk_pattern = tk.StringVar(value=DEFAULT_NAME_PATTERN)
+        self.gtk_subfolder = tk.StringVar(value="")
+        self.gtk_index = tk.StringVar(value="1")
+        self.gtk_outdir = tk.StringVar(value="")
+        for v in (self.gtk_pattern, self.gtk_subfolder, self.gtk_index):
+            v.trace_add("write", lambda *a: self._gotek_names_changed())
 
-        self._build_disk_tab()
-        self._build_gotek_tab()
+        self._setup_fonts()
+        self._apply_theme()
+        self._build_ui()
 
-        self.status = ttk.Label(root, text="Prêt.", relief="sunken", anchor="w")
-        self.status.pack(side="bottom", fill="x")
+        root.bind_all("<F1>", lambda e: self._show_tab(0))
+        root.bind_all("<F2>", lambda e: self._show_tab(1))
+        root.bind_all("<F3>", lambda e: self.toggle_monitor())
+        root.bind_all("<Control-o>", lambda e: self.open_disk())
+        root.bind_all("<Control-n>", lambda e: self.new_disk())
+        root.bind_all("<Control-s>", lambda e: self.save_disk())
 
         # Glisser-déposer depuis l'explorateur Windows.
         if _register_drag_drop(root, self._on_drop):
             self._set_status(
-                "Prêt. Astuce : glissez des fichiers (explorateur) sur la "
-                "fenêtre — .dsk/.adf s'ouvrent (ou alimentent l'onglet Gotek), "
-                "les autres s'ajoutent à la disquette ouverte.")
+                "Prêt. Glissez des fichiers sur la fenêtre : .dsk/.adf "
+                "s'ouvrent (ou alimentent l'onglet Gotek), les autres "
+                "s'ajoutent à la disquette ouverte.")
         elif sys.platform == "win32":
             self._set_status("Prêt. (glisser-déposer non actif)")
+
+    # ------------------------------------------------------------------ #
+    # Thème, polices, styles ttk
+    # ------------------------------------------------------------------ #
+    def _setup_fonts(self) -> None:
+        families = set(tkfont.families(self.root))
+        mono = next((f for f in ("Consolas", "Lucida Console", "Menlo",
+                                 "DejaVu Sans Mono", "Courier New", "Courier")
+                     if f in families), "TkFixedFont")
+        has_title = PIXEL_TITLE in families
+        has_body = PIXEL_BODY in families
+        self.pixel_fonts = has_title and has_body
+        self.has_title_font = has_title
+        # Tailles négatives = pixels (rendu net des polices pixel).
+        if has_title:
+            self.f_title = tkfont.Font(family=PIXEL_TITLE, size=-22)
+            self.f_head = tkfont.Font(family=PIXEL_TITLE, size=-11)
+            self.f_btn = tkfont.Font(family=PIXEL_TITLE, size=-11)
+        else:
+            self.f_title = tkfont.Font(family=mono, size=-26, weight="bold")
+            self.f_head = tkfont.Font(family=mono, size=-14, weight="bold")
+            self.f_btn = tkfont.Font(family=mono, size=-14, weight="bold")
+        if has_body:
+            self.f_body = tkfont.Font(family=PIXEL_BODY, size=-22)
+            self.f_mono = tkfont.Font(family=PIXEL_BODY, size=-21)
+            self.f_small = tkfont.Font(family=PIXEL_BODY, size=-16)
+        else:
+            self.f_body = tkfont.Font(family=mono, size=-16)
+            self.f_mono = tkfont.Font(family=mono, size=-15)
+            self.f_small = tkfont.Font(family=mono, size=-12)
+
+    def caps(self, text: str) -> str:
+        """Majuscules ; sans accents avec Press Start 2P, qui n'a pas de
+        capitales accentuées (comme sur le CPC)."""
+        text = text.upper()
+        if getattr(self, "has_title_font", False):
+            text = "".join(c for c in unicodedata.normalize("NFD", text)
+                           if unicodedata.category(c) != "Mn")
+        return text
+
+    def _apply_theme(self) -> None:
+        self.t = SimpleNamespace(**THEMES[self._theme_name])
+        t = self.t
+        self.root.configure(bg=t.frame)
+        st = ttk.Style(self.root)
+        st.theme_use("clam")
+        row_h = self.f_body.metrics("linespace") + 8
+        st.configure("Pixel.Treeview", background=t.panel,
+                     fieldbackground=t.panel, foreground=t.ink,
+                     font=self.f_body, rowheight=row_h, borderwidth=0,
+                     relief="flat")
+        st.map("Pixel.Treeview",
+               background=[("selected", t.ink)],
+               foreground=[("selected", t.paper)])
+        st.configure("Pixel.Treeview.Heading", background=t.panel,
+                     foreground=t.acc, font=self.f_body, relief="flat",
+                     borderwidth=0, padding=(6, 4))
+        st.map("Pixel.Treeview.Heading", background=[("active", t.dim)],
+               foreground=[("active", t.hi)])
+        st.layout("Pixel.Treeview",
+                  [("Pixel.Treeview.treearea", {"sticky": "nswe"})])
+        for orient in ("Vertical", "Horizontal"):
+            name = f"Pixel.{orient}.TScrollbar"
+            st.configure(name, background=t.acc, troughcolor=t.panel,
+                         bordercolor=t.panel, arrowcolor=t.paper,
+                         lightcolor=t.acc, darkcolor=t.acc, gripcount=0,
+                         relief="flat", arrowsize=16)
+            st.map(name, background=[("active", t.hi), ("pressed", t.ink)])
+
+    def toggle_monitor(self) -> None:
+        """Bascule couleur (CTM644) <-> moniteur vert (GT65)."""
+        self._theme_name = "vert" if self._theme_name == "couleur" else "couleur"
+        if self._blink_id:
+            self.root.after_cancel(self._blink_id)
+            self._blink_id = None
+        self.shell.destroy()
+        self._apply_theme()
+        self._build_ui()
+        self._refresh(rescan=False)
+        if self._last_hex:
+            self._show_hex(*self._last_hex)
+        self._gotek_refresh_tree()
+        self._gotek_result_render()
+
+    # ------------------------------------------------------------------ #
+    # Construction de l'interface
+    # ------------------------------------------------------------------ #
+    def entry(self, master, var, width=10, **kw) -> tk.Entry:
+        t = self.t
+        return tk.Entry(master, textvariable=var, width=width, font=self.f_body,
+                        bg=t.paper, fg=t.ink, insertbackground=t.ink,
+                        insertwidth=10, relief="flat", bd=3,
+                        highlightthickness=3, highlightbackground=t.acc,
+                        highlightcolor=t.hi, selectbackground=t.ink,
+                        selectforeground=t.paper, disabledbackground=t.panel,
+                        readonlybackground=t.paper, **kw)
+
+    def _label(self, master, text="", fg=None, bg=None, font=None, **kw) -> tk.Label:
+        return tk.Label(master, text=text, fg=fg or self.t.ink,
+                        bg=bg or master.cget("bg"), font=font or self.f_body,
+                        **kw)
+
+    def _build_ui(self) -> None:
+        t = self.t
+        self.shell = tk.Frame(self.root, bg=t.frame, padx=22, pady=22)
+        self.shell.pack(fill="both", expand=True)
+        screen = tk.Frame(self.shell, bg=t.paper, padx=22, pady=16)
+        screen.pack(fill="both", expand=True)
+
+        # --- en-tête ---
+        head = tk.Frame(screen, bg=t.paper)
+        head.pack(fill="x")
+        left = tk.Frame(head, bg=t.paper)
+        left.pack(side="left")
+        self._label(left, "CPC DISK EDITOR", font=self.f_title).pack(anchor="w")
+        self._label(left, "Éditeur de disquettes .DSK & Gotek · AMSDOS / CP/M",
+                    fg=t.acc).pack(anchor="w", pady=(8, 0))
+        right = tk.Frame(head, bg=t.paper)
+        right.pack(side="right", anchor="s")
+        PixelButton(right, self,
+                    "Moniteur : " + ("vert" if self._theme_name == "vert"
+                                     else "couleur"),
+                    command=self.toggle_monitor).pack(side="right")
+        stripes = tk.Frame(right, bg=t.paper)
+        stripes.pack(side="right", padx=(0, 18))
+        for c in (t.r, t.g, t.b):
+            tk.Frame(stripes, bg=c, width=170, height=8).pack(pady=2)
+
+        # --- onglets ---
+        tabs = tk.Frame(screen, bg=t.paper)
+        tabs.pack(fill="x", pady=(14, 0))
+        self._tab_labels: List[tk.Label] = []
+        for i, text in enumerate(("F1 DISQUETTE .DSK", "F2 GOTEK USB")):
+            lbl = tk.Label(tabs, text=text, font=self.f_head, padx=18,
+                           pady=12, cursor="hand2")
+            lbl.pack(side="left", padx=(0, 8))
+            lbl.bind("<Button-1>", lambda e, i=i: self._show_tab(i))
+            self._tab_labels.append(lbl)
+        tk.Frame(screen, bg=t.ink, height=4).pack(fill="x")
+
+        # --- pied de page (avant le contenu pour rester visible) ---
+        foot = tk.Frame(screen, bg=t.paper)
+        foot.pack(side="bottom", fill="x")
+        tk.Frame(foot, bg=t.ink, height=4).pack(fill="x", pady=(10, 8))
+        self.status = self._label(foot, self._status_text, fg=t.hi,
+                                  anchor="w", justify="left")
+        self.status.pack(side="left", fill="x", expand=True)
+        self.ready = self._label(foot, "Ready █")
+        self.ready.pack(side="right")
+        self._blink(True)
+
+        # --- contenu ---
+        self.content = tk.Frame(screen, bg=t.paper)
+        self.content.pack(fill="both", expand=True, pady=(14, 0))
+        self.tab_disk = tk.Frame(self.content, bg=t.paper)
+        self.tab_gotek = tk.Frame(self.content, bg=t.paper)
+        self._build_disk_tab()
+        self._build_gotek_tab()
+        self._show_tab(self._tab)
+
+    def _show_tab(self, i: int) -> None:
+        t = self.t
+        self._tab = i
+        for j, lbl in enumerate(self._tab_labels):
+            on = j == i
+            lbl.config(bg=t.ink if on else t.panel, fg=t.paper if on else t.acc)
+        (self.tab_gotek if i == 0 else self.tab_disk).pack_forget()
+        (self.tab_disk if i == 0 else self.tab_gotek).pack(fill="both",
+                                                           expand=True)
+
+    def _blink(self, on: bool) -> None:
+        try:
+            self.ready.config(text="Ready █" if on else "Ready  ")
+        except tk.TclError:
+            return
+        self._blink_id = self.root.after(530, lambda: self._blink(not on))
 
     # ================================================================== #
     # Onglet Disquette
     # ================================================================== #
     def _build_disk_tab(self) -> None:
-        bar = ttk.Frame(self.tab_disk, padding=(6, 4))
+        t = self.t
+        tab = self.tab_disk
+
+        bar = tk.Frame(tab, bg=t.paper)
         bar.pack(side="top", fill="x")
-        ttk.Button(bar, text="Ouvrir…", command=self.open_disk).pack(side="left", padx=2)
-        ttk.Button(bar, text="Nouveau", command=self.new_disk).pack(side="left", padx=2)
-        ttk.Button(bar, text="Sauver", command=self.save_disk).pack(side="left", padx=2)
-        ttk.Button(bar, text="Enregistrer sous…",
-                   command=self.save_disk_as).pack(side="left", padx=2)
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=6)
-        ttk.Label(bar, text="Secteur (piste sect):").pack(side="left")
-        self.sector_var = tk.StringVar(value="0 0")
-        ttk.Entry(bar, textvariable=self.sector_var, width=6).pack(side="left", padx=2)
-        ttk.Button(bar, text="Afficher", command=self.show_sector).pack(side="left", padx=2)
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=6)
-        self.file_label = ttk.Label(bar, text="(aucun disque)", foreground="#666")
-        self.file_label.pack(side="left", padx=4)
+        for text, icon, cmd in (("Ouvrir…", "open", self.open_disk),
+                                ("Nouveau", "new", self.new_disk),
+                                ("Sauver", "save", self.save_disk),
+                                ("Enreg. sous…", None, self.save_disk_as)):
+            PixelButton(bar, self, text, command=cmd, icon=icon).pack(
+                side="left", padx=(0, 10))
+        tk.Frame(bar, bg=t.dim, width=4, height=36).pack(side="left",
+                                                         padx=(4, 14))
+        self._label(bar, "PISTE SECT", fg=t.acc, font=self.f_head).pack(
+            side="left", padx=(0, 10))
+        sect = self.entry(bar, self.sector_var, width=6)
+        sect.pack(side="left", padx=(0, 10))
+        sect.bind("<Return>", lambda e: self.show_sector())
+        PixelButton(bar, self, "Afficher", kind="primary", icon="eye",
+                    command=self.show_sector).pack(side="left")
 
-        self.info = ttk.Label(self.tab_disk, text="Géométrie: —", padding=(8, 2),
-                              anchor="w")
-        self.info.pack(side="top", fill="x")
+        info = tk.Frame(tab, bg=t.panel, padx=12, pady=6)
+        info.pack(side="top", fill="x", pady=(12, 12))
+        self.file_label = self._label(info, "A: (aucun disque)", fg=t.hi,
+                                      anchor="w")
+        self.file_label.pack(side="left")
+        self.info = self._label(info, "Géométrie : —", fg=t.acc, anchor="w")
+        self.info.pack(side="left", padx=(24, 0), fill="x", expand=True)
 
-        pane = ttk.PanedWindow(self.tab_disk, orient="horizontal")
-        pane.pack(fill="both", expand=True, padx=6, pady=4)
+        pane = tk.PanedWindow(tab, orient="horizontal", bg=t.paper,
+                              sashwidth=14, bd=0, sashrelief="flat",
+                              opaqueresize=True)
+        pane.pack(fill="both", expand=True)
 
-        left = ttk.LabelFrame(pane, text="Fichiers (Filer + AMSDOS)", padding=4)
+        # --- colonne gauche : catalogue + carte ---
+        leftcol = tk.Frame(pane, bg=t.paper)
+        mp = Panel(leftcol, self, "Carte des secteurs")
+        mp.pack(side="bottom", fill="x", pady=(16, 0))
+        files = Panel(leftcol, self, "Cat · Filer + AMSDOS")
+        files.pack(side="top", fill="both", expand=True)
+        self.files_panel = files
+        actions = tk.Frame(files.body, bg=t.panel, padx=10, pady=10)
+        actions.pack(side="bottom", fill="x")
+        tk.Frame(files.body, bg=t.dim, height=2).pack(side="bottom", fill="x")
+        tv_frame = tk.Frame(files.body, bg=t.panel)
+        tv_frame.pack(fill="both", expand=True, padx=6, pady=6)
         cols = ("name", "source", "type", "length", "offset")
-        self.tree = ttk.Treeview(left, columns=cols, show="headings",
-                                 selectmode="browse")
-        self.tree.heading("name", text="Nom")
-        self.tree.heading("source", text="Couche")
-        self.tree.heading("type", text="Type")
-        self.tree.heading("length", text="Longueur")
-        self.tree.heading("offset", text="@")
-        self.tree.column("name", width=130, anchor="w")
-        self.tree.column("source", width=70, anchor="center")
-        self.tree.column("type", width=50, anchor="center")
-        self.tree.column("length", width=70, anchor="e")
-        self.tree.column("offset", width=80, anchor="e")
-        tvb = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
+        self.tree = ttk.Treeview(tv_frame, columns=cols, show="headings",
+                                 selectmode="browse", style="Pixel.Treeview",
+                                 height=5)
+        for col, text, w, anchor in (("name", "NOM", 130, "w"),
+                                     ("source", "COUCHE", 80, "w"),
+                                     ("type", "TYPE", 60, "w"),
+                                     ("length", "LONG.", 70, "e"),
+                                     ("offset", "@", 80, "e")):
+            self.tree.heading(col, text=text, anchor=anchor)
+            self.tree.column(col, width=w, anchor=anchor, stretch=True)
+        tvb = ttk.Scrollbar(tv_frame, orient="vertical",
+                            command=self.tree.yview,
+                            style="Pixel.Vertical.TScrollbar")
         self.tree.configure(yscrollcommand=tvb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         tvb.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self._on_file_select)
+        self.tree.bind("<Delete>", lambda e: self.delete_file())
 
-        actions = ttk.Frame(left)
-        actions.pack(side="left", fill="x", pady=(6, 0))
-        ttk.Button(actions, text="Ajouter…", command=self.add_file).pack(
-            side="left", padx=2)
-        ttk.Button(actions, text="Extraire…", command=self.extract_file).pack(
-            side="left", padx=2)
-        ttk.Button(actions, text="Supprimer", command=self.delete_file).pack(
-            side="left", padx=2)
-        pane.add(left, weight=1)
+        PixelButton(actions, self, "Ajouter…", icon="new",
+                    command=self.add_file).pack(side="left")
+        PixelButton(actions, self, "Extraire…", icon="extract",
+                    command=self.extract_file).pack(side="left", padx=8)
+        PixelButton(actions, self, "Supprimer", kind="danger", icon="trash",
+                    command=self.delete_file).pack(side="right")
 
-        right = ttk.LabelFrame(pane, text="Contenu (hex)", padding=4)
-        self.hex_text = tk.Text(right, width=70, height=24,
-                                font=("Courier", 10), state="disabled")
-        hvsb = ttk.Scrollbar(right, orient="vertical", command=self.hex_text.yview)
-        hsb = ttk.Scrollbar(right, orient="horizontal", command=self.hex_text.xview)
+        self.map_title = mp.head
+        self.map_canvas = tk.Canvas(mp.body, bg=t.panel, height=170,
+                                    highlightthickness=0, bd=0,
+                                    cursor="crosshair")
+        self.map_canvas.pack(fill="x", padx=10, pady=(10, 0))
+        self.map_canvas.bind("<Configure>", lambda e: self._draw_map())
+        self.map_canvas.bind("<Button-1>", self._on_map_click)
+        self.map_canvas.bind("<Motion>", self._on_map_motion)
+        legend = tk.Frame(mp.body, bg=t.panel, padx=10, pady=8)
+        legend.pack(fill="x")
+        for color, text in ((t.warm, "Occupé"), (t.ink, "Fichier sélectionné"),
+                            (t.dim, "Libre"), (t.hi, "Curseur")):
+            tk.Frame(legend, bg=color, width=14, height=14).pack(side="left")
+            self._label(legend, text, fg=t.hi, font=self.f_small).pack(
+                side="left", padx=(6, 16))
+        pane.add(leftcol, minsize=520, width=600, stretch="always")
+
+        # --- colonne droite : hexadécimal ---
+        hexp = Panel(pane, self, "Contenu · hex", accent=t.ink)
+        self.hex_title = self._label(hexp.body, "# —", fg=t.hi, anchor="w",
+                                     justify="left", padx=14, pady=8)
+        self.hex_title.pack(fill="x")
+        hexp.body.bind("<Configure>", lambda e: self.hex_title.config(
+            wraplength=max(200, e.width - 30)))
+        tk.Frame(hexp.body, bg=t.dim, height=2).pack(fill="x")
+        hx = tk.Frame(hexp.body, bg=t.panel)
+        hx.pack(fill="both", expand=True)
+        self.hex_text = tk.Text(hx, font=self.f_mono, wrap="none",
+                                bg=t.panel, fg=t.ink, relief="flat", bd=0,
+                                padx=14, pady=10, insertwidth=0,
+                                selectbackground=t.ink,
+                                selectforeground=t.paper,
+                                highlightthickness=0, cursor="arrow",
+                                spacing1=1, spacing3=1)
+        self.hex_text.tag_configure("off", foreground=t.acc)
+        self.hex_text.tag_configure("hex", foreground=t.ink)
+        self.hex_text.tag_configure("asc", foreground=t.hi)
+        self.hex_text.tag_configure("muted", foreground=t.acc)
+        hvsb = ttk.Scrollbar(hx, orient="vertical", command=self.hex_text.yview,
+                             style="Pixel.Vertical.TScrollbar")
+        hsb = ttk.Scrollbar(hx, orient="horizontal",
+                            command=self.hex_text.xview,
+                            style="Pixel.Horizontal.TScrollbar")
         self.hex_text.configure(xscrollcommand=hsb.set, yscrollcommand=hvsb.set)
-        self.hex_text.pack(side="left", fill="both", expand=True)
-        hvsb.pack(side="right", fill="y")
         hsb.pack(side="bottom", fill="x")
-        pane.add(right, weight=2)
+        hvsb.pack(side="right", fill="y")
+        self.hex_text.pack(side="left", fill="both", expand=True)
+        self.hex_text.config(state="disabled")
+        pane.add(hexp, minsize=520, stretch="always")
+
+    # ------------------------------------------------------------------ #
+    # Catalogue, géométrie, carte des secteurs
+    # ------------------------------------------------------------------ #
+    def _scan_disk(self) -> None:
+        self._sec_data, self._sec_used = [], []
+        self._geom = (0, 0)
+        if self.disk is None:
+            return
+        tracks, sectors = _probe_geometry(self.disk)
+        self._geom = (tracks, sectors)
+        for tr in range(tracks):
+            drow, urow = [], []
+            for se in range(sectors):
+                try:
+                    d = bytes(self.disk.get_sector(tr, se))
+                except Exception:  # noqa: BLE001
+                    d = b""
+                drow.append(d)
+                empty = not d or (d[0] in (0xE5, 0x00) and d.count(d[0]) == len(d))
+                urow.append(not empty)
+            self._sec_data.append(drow)
+            self._sec_used.append(urow)
+
+    def _find_file_sectors(self, data: bytes) -> Set[Tuple[int, int]]:
+        """Secteurs dont le contenu figure dans ``data`` (détection par
+        contenu : indépendante du format de répertoire)."""
+        found: Set[Tuple[int, int]] = set()
+        if not data:
+            return found
+        for tr, row in enumerate(self._sec_data):
+            for se, sec in enumerate(row):
+                if not self._sec_used[tr][se]:
+                    continue
+                for a in (0, 128, 256):
+                    probe = sec[a:a + 48]
+                    if len(probe) == 48 and len(set(probe)) > 2 and probe in data:
+                        found.add((tr, se))
+                        break
+        return found
+
+    def _map_layout(self) -> Optional[Tuple[int, int, int, int, int]]:
+        tracks, sectors = self._geom
+        if not tracks or not sectors:
+            return None
+        width = max(200, self.map_canvas.winfo_width())
+        lab, gap = 30, 2
+        cell = int((width - lab - gap * (tracks - 1)) / tracks)
+        cell = max(4, min(cell, 22))
+        return lab, cell, gap, tracks, sectors
+
+    def _draw_map(self) -> None:
+        t = self.t
+        c = self.map_canvas
+        c.delete("all")
+        lay = self._map_layout()
+        if lay is None:
+            c.config(height=90)
+            c.create_text(max(200, c.winfo_width()) / 2, 45,
+                          text="AUCUNE DISQUETTE", font=self.f_head, fill=t.acc)
+            self.map_title.config(text="CARTE DES SECTEURS")
+            return
+        lab, cell, gap, tracks, sectors = lay
+        self.map_title.config(text=f"CARTE DES SECTEURS · {tracks} × {sectors}")
+        height = sectors * (cell + gap) + 26
+        if int(float(c.cget("height"))) != height:
+            c.config(height=height)
+        for se in range(sectors):
+            if sectors <= 12 or se % 2 == 0:
+                c.create_text(lab - 8, se * (cell + gap) + cell / 2,
+                              text=str(se), anchor="e", font=self.f_small,
+                              fill=t.acc)
+        for tr in range(tracks):
+            x = lab + tr * (cell + gap)
+            for se in range(sectors):
+                y = se * (cell + gap)
+                if (tr, se) in self._file_secs:
+                    col = t.ink
+                elif self._sec_used[tr][se]:
+                    col = t.warm
+                else:
+                    col = t.dim
+                c.create_rectangle(x, y, x + cell, y + cell, fill=col,
+                                   outline="")
+            if tr % 10 == 0 or tr == tracks - 1:
+                anchor = "ne" if tr == tracks - 1 else "nw"
+                xx = x + cell if tr == tracks - 1 else x
+                c.create_text(xx, sectors * (cell + gap) + 4,
+                              text=f"P{tr:02d}", anchor=anchor,
+                              font=self.f_small, fill=t.acc)
+        if self._cursor and self._cursor[0] < tracks and self._cursor[1] < sectors:
+            tr, se = self._cursor
+            x, y = lab + tr * (cell + gap), se * (cell + gap)
+            c.create_rectangle(x, y, x + cell, y + cell, fill=t.hi, outline="")
+            c.create_rectangle(x - 3, y - 3, x + cell + 3, y + cell + 3,
+                               outline=t.hi, width=2)
+
+    def _map_hit(self, event) -> Optional[Tuple[int, int]]:
+        lay = self._map_layout()
+        if lay is None:
+            return None
+        lab, cell, gap, tracks, sectors = lay
+        tr = int((event.x - lab) // (cell + gap))
+        se = int(event.y // (cell + gap))
+        if 0 <= tr < tracks and 0 <= se < sectors and event.x >= lab:
+            return tr, se
+        return None
+
+    def _on_map_click(self, event) -> None:
+        hit = self._map_hit(event)
+        if hit:
+            self.sector_var.set(f"{hit[0]} {hit[1]}")
+            self.show_sector()
+
+    def _on_map_motion(self, event) -> None:
+        hit = self._map_hit(event)
+        if hit:
+            tr, se = hit
+            state = ("fichier sélectionné" if hit in self._file_secs else
+                     "occupé" if self._sec_used[tr][se] else "libre")
+            self.status.config(text=f"Piste {tr} · secteur {se} · {state}")
+        else:
+            self.status.config(text=self._status_text)
 
     def _refresh_files(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self._files = []
-        if self.disk is None:
-            return
-        fs = CpcFilesystem(self.disk)
-        for f in fs.list_files():
-            self._files.append(f)
-            self.tree.insert(
-                "", "end", iid=str(len(self._files) - 1),
-                values=(f.name, f.source, f.type_name, f.length,
-                        f"0x{f.offset:05X}"))
+        if self.disk is not None:
+            fs = CpcFilesystem(self.disk)
+            for f in fs.list_files():
+                self._files.append(f)
+                self.tree.insert(
+                    "", "end", iid=str(len(self._files) - 1),
+                    values=(f.name, f.source, f.type_name, f.length,
+                            f"&{f.offset:05X}"))
+        n = len(self._files)
+        self.files_panel.head.config(
+            text=f"CAT · {n} FICHIER{'S' if n > 1 else ''} · FILER + AMSDOS"
+            if self.disk is not None else "CAT · FILER + AMSDOS")
 
     def _selected_file(self) -> Optional[CpcFile]:
         sel = self.tree.selection()
@@ -313,6 +1043,22 @@ class DskEditorApp:
         if idx >= len(self._files):
             return None
         return self._files[idx]
+
+    def _refresh(self, rescan: bool = True) -> None:
+        if rescan:
+            self._scan_disk()
+            self._file_secs = set()
+        if self.disk is None:
+            self.info.config(text="Géométrie : —")
+            self.file_label.config(text="A: (aucun disque)")
+        else:
+            self.info.config(text=self.disk.summary())
+            shown = self.path or "(nouveau)"
+            if len(shown) > 60:
+                shown = "…" + shown[-58:]
+            self.file_label.config(text=f"A: {shown}")
+        self._refresh_files()
+        self._draw_map()
 
     # ------------------------------------------------------------------ #
     # Ouverture / création / sauvegarde
@@ -329,94 +1075,99 @@ class DskEditorApp:
         try:
             self.disk = ADFDisk.load(path)
         except (OSError, ADFError) as exc:
-            messagebox.showerror("Erreur d'ouverture", str(exc))
+            self.error("Erreur d'ouverture", str(exc))
             return
         self.path = path
-        self.file_label.config(text=path, foreground="#000")
+        self._cursor = None
+        self._last_hex = None
+        self._clear_hex()
         self._refresh()
-        self._set_status(f"Ouvert: {path}")
+        self._show_tab(0)
+        self._set_status(f"Ouvert : {path}")
 
     def new_disk(self) -> None:
-        if self.disk is not None and not messagebox.askyesno(
-                "Modifier", "Abandonner les modifications non sauvegardées ?"):
+        if self.disk is not None and not self.ask(
+                "Nouvelle disquette",
+                "Abandonner les modifications non sauvegardées ?"):
             return
         self.disk = ADFDisk.new_blank()
         self.path = None
-        self.file_label.config(text="(nouveau)", foreground="#666")
+        self._cursor = None
+        self._last_hex = None
+        self._clear_hex()
         self._refresh()
         self._set_status("Nouvelle disquette vierge.")
 
+    def _save_to(self, path: str) -> bool:
+        try:
+            self.disk.save(path)
+        except OSError as exc:
+            self.error("Erreur d'enregistrement", str(exc))
+            return False
+        self.path = path
+        self._refresh(rescan=False)
+        return True
+
     def save_disk(self) -> None:
         if self.disk is None:
-            messagebox.showinfo("Sauver", "Aucune disquette à sauvegarder.")
+            self.info_box("Sauver", "Aucune disquette à sauvegarder.")
             return
-        if self.path is None:
-            self.path = filedialog.asksaveasfilename(
-                title="Sauver sous…", defaultextension=".dsk",
-                filetypes=[("CPC DSK", "*.dsk")])
-            if not self.path:
-                return
-        try:
-            self.disk.save(self.path)
-        except OSError as exc:
-            messagebox.showerror("Erreur d'enregistrement", str(exc))
-            return
-        self.file_label.config(text=self.path, foreground="#000")
-        self._set_status(f"Sauvegardé: {self.path}")
+        path = self.path or filedialog.asksaveasfilename(
+            title="Sauver sous…", defaultextension=".dsk",
+            filetypes=[("CPC DSK", "*.dsk")])
+        if path and self._save_to(path):
+            self._set_status(f"Sauvegardé : {path}")
 
     def save_disk_as(self) -> None:
         """« Enregistrer sous » : sauvegarde la disquette sur un nouveau
         chemin (devient le chemin courant — les « Sauver » suivants
         écrivent sur ce nouveau fichier)."""
         if self.disk is None:
-            messagebox.showinfo(
-                "Enregistrer sous", "Aucune disquette à sauvegarder.")
+            self.info_box("Enregistrer sous", "Aucune disquette à sauvegarder.")
             return
         path = filedialog.asksaveasfilename(
             title="Enregistrer la disquette sous…",
             defaultextension=".dsk",
             initialfile=os.path.basename(self.path) if self.path else None,
             filetypes=[("CPC DSK", "*.dsk")])
-        if not path:
-            return
-        try:
-            self.disk.save(path)
-        except OSError as exc:
-            messagebox.showerror("Erreur d'enregistrement", str(exc))
-            return
-        self.path = path
-        self.file_label.config(text=path, foreground="#000")
-        self._set_status(f"Enregistré sous: {path}")
+        if path and self._save_to(path):
+            self._set_status(f"Enregistré sous : {path}")
 
     def _persist(self) -> None:
         """Sauvegarde sur le chemin courant (ou propose un chemin)."""
         if self.path is not None:
-            try:
-                self.disk.save(self.path)
-                self._set_status(f"Sauvegardé: {self.path}")
-                return
-            except OSError as exc:
-                messagebox.showerror("Erreur d'enregistrement", str(exc))
-                return
-        self.save_disk()
-
-    def _refresh(self) -> None:
-        if self.disk is None:
-            self.info.config(text="Géométrie: —")
-            self.tree.delete(*self.tree.get_children())
-            self._files = []
+            if self._save_to(self.path):
+                self._set_status(f"Sauvegardé : {self.path}")
             return
-        self.info.config(text=self.disk.summary())
-        self._refresh_files()
+        self.save_disk()
 
     # ------------------------------------------------------------------ #
     # Inspection hex
     # ------------------------------------------------------------------ #
-    def _show_hex(self, data: bytes, title: str) -> None:
+    def _clear_hex(self) -> None:
+        self.hex_title.config(text="# —")
         self.hex_text.config(state="normal")
         self.hex_text.delete("1.0", "end")
-        self.hex_text.insert("1.0", f"# {title}\n" + (hexdump(data) or "(vide)"))
         self.hex_text.config(state="disabled")
+
+    def _show_hex(self, data: bytes, title: str) -> None:
+        self._last_hex = (data, title)
+        self.hex_title.config(text=f"# {title}")
+        tx = self.hex_text
+        tx.config(state="normal")
+        tx.delete("1.0", "end")
+        if not data:
+            tx.insert("end", "(vide)", "muted")
+        else:
+            tx.insert("end", "OFFSET    ", "muted")
+            tx.insert("end", " ".join(f"{i:02X}" for i in range(16)), "muted")
+            tx.insert("end", "  ASCII\n", "muted")
+            for off, hx, asc in _hex_rows(data):
+                tx.insert("end", off + "  ", "off")
+                tx.insert("end", hx + "  ", "hex")
+                tx.insert("end", asc + "\n", "asc")
+        tx.config(state="disabled")
+        tx.yview_moveto(0)
 
     def _on_file_select(self, _event) -> None:
         f = self._selected_file()
@@ -425,28 +1176,34 @@ class DskEditorApp:
         try:
             data = CpcFilesystem(self.disk).read_file(f.name, source=f.source)
         except (CpcError, ADFError) as exc:
-            self._show_hex(b"", f"erreur: {exc}")
+            self._show_hex(b"", f"erreur : {exc}")
             return
         self._show_hex(
             data,
-            f"{f.name}  [{f.source} {f.type_name} {f.length} o] "
-            f"load={f.load_addr:#06x} @0x{f.offset:05X}")
-        self._set_status(f"Fichier: {f.name} ({f.source})")
+            f"{f.name}  [{f.source} {f.type_name} {f.length} o]  "
+            f"load=&{f.load_addr:04X}  @&{f.offset:05X}")
+        self._file_secs = self._find_file_sectors(data)
+        self._draw_map()
+        self._set_status(f"Fichier : {f.name} ({f.source}) · "
+                         f"{len(self._file_secs)} secteur(s) repéré(s)")
 
     def show_sector(self) -> None:
         if self.disk is None:
-            messagebox.showinfo("Secteur", "Ouvrez d'abord une disquette.")
+            self.info_box("Secteur", "Ouvrez d'abord une disquette.")
             return
         try:
             track_s, sec_s = self.sector_var.get().split()
             track, sector = int(track_s), int(sec_s)
             data = self.disk.get_sector(track, sector)
         except (ValueError, ADFError) as exc:
-            messagebox.showerror(
-                "Secteur invalide", f"« {self.sector_var.get()} » — {exc}")
+            self.error("Secteur invalide",
+                       f"« {self.sector_var.get()} » — {exc}\n\n"
+                       "Format attendu : « piste secteur », ex. 0 0.")
             return
-        self._show_hex(data, f"secteur piste {track} secteur {sector} "
-                             f"({len(data)} o)")
+        self._cursor = (track, sector)
+        self._draw_map()
+        self._show_hex(bytes(data), f"secteur piste {track} secteur {sector} "
+                                    f"({len(data)} o)")
         self._set_status(f"Secteur {track}/{sector}")
 
     # ------------------------------------------------------------------ #
@@ -454,7 +1211,7 @@ class DskEditorApp:
     # ------------------------------------------------------------------ #
     def add_file(self) -> None:
         if self.disk is None:
-            messagebox.showinfo("Ajout", "Créez ou ouvrez d'abord une disquette.")
+            self.info_box("Ajout", "Créez ou ouvrez d'abord une disquette.")
             return
         local = filedialog.askopenfilename(
             title="Fichier local à copier sur la disquette")
@@ -463,7 +1220,7 @@ class DskEditorApp:
         self._do_add_file(local)
 
     def _do_add_file(self, local: str) -> None:
-        dlg = AddFileDialog(self.root, _suggest_83(local))
+        dlg = AddFileDialog(self, _suggest_83(local))
         self.root.wait_window(dlg.win)
         if dlg.result is None:
             return
@@ -477,9 +1234,10 @@ class DskEditorApp:
                 exec_addr=dlg.result["load_addr"],
                 mode=dlg.result["mode"])
         except (CpcError, ADFError, OSError) as exc:
-            messagebox.showerror("Échec de l'écriture", str(exc))
+            self.error("Échec de l'écriture", str(exc))
             return
-        self._refresh_files()
+        self._scan_disk()
+        self._file_secs = set()
         self._persist()
         self._set_status(f"Fichier {dlg.result['name']!r} ({_fmt_size(len(data))}) "
                          f"écrit [{dlg.result['mode']}].")
@@ -487,14 +1245,15 @@ class DskEditorApp:
     def extract_file(self) -> None:
         f = self._selected_file()
         if f is None or self.disk is None:
-            messagebox.showinfo("Extraction", "Sélectionnez un fichier à extraire.")
+            self.info_box("Extraction", "Sélectionnez un fichier à extraire.")
             return
         # Nom de fichier proposé avec l'extension CPC conservée :
         # « MONPROG BAS » -> « monprog.bas », sinon « nom.bin ».
         name = f.name.strip()
         if " " in name:
             base, _, ext = name.rpartition(" ")
-            if ext in ("BAS", "BIN", "COM", "DOC", "SYS", "LIB", "B", "HEX"):
+            if ext in ("BAS", "BIN", "COM", "DOC", "SYS", "LIB", "B", "HEX",
+                       "MD", "TXT"):
                 base = base.strip()
                 if base:
                     name = f"{base.lower()}.{ext.lower()}"
@@ -507,7 +1266,7 @@ class DskEditorApp:
             with open(out, "wb") as fh:
                 fh.write(data)
         except (CpcError, ADFError, OSError) as exc:
-            messagebox.showerror("Échec de l'extraction", str(exc))
+            self.error("Échec de l'extraction", str(exc))
             return
         self._set_status(f"{f.name} ({f.source}) extrait vers {out} "
                          f"({_fmt_size(len(data))}).")
@@ -515,17 +1274,23 @@ class DskEditorApp:
     def delete_file(self) -> None:
         f = self._selected_file()
         if f is None or self.disk is None:
-            messagebox.showinfo("Suppression", "Sélectionnez un fichier à supprimer.")
+            self.info_box("Suppression", "Sélectionnez un fichier à supprimer.")
             return
-        if not messagebox.askyesno(
-                "Supprimer", f"Supprimer {f.name} ({f.source}) de la disquette ?"):
+        if not self.ask(
+                "Supprimer ?",
+                f"Effacer {f.name} ({f.source} · {f.type_name} · {f.length} o) "
+                "de la disquette ?\n\nLa disquette sera sauvegardée.",
+                danger=True):
             return
         try:
             CpcFilesystem(self.disk).delete_file(f.name)
         except (CpcError, ADFError) as exc:
-            messagebox.showerror("Échec de la suppression", str(exc))
+            self.error("Échec de la suppression", str(exc))
             return
-        self._refresh_files()
+        self._scan_disk()
+        self._file_secs = set()
+        self._last_hex = None
+        self._clear_hex()
         self._persist()
         self._set_status(f"Fichier {f.name!r} supprimé.")
 
@@ -533,86 +1298,217 @@ class DskEditorApp:
     # Onglet Gotek
     # ================================================================== #
     def _build_gotek_tab(self) -> None:
-        top = ttk.Frame(self.tab_gotek, padding=6)
-        top.pack(fill="both", expand=True)
+        t = self.t
+        tab = self.tab_gotek
+        tab.columnconfigure(0, weight=1, uniform="g")
+        tab.columnconfigure(1, weight=1, uniform="g")
+        tab.rowconfigure(0, weight=1)
 
-        sources = ttk.LabelFrame(top, text="Sources (disquettes .dsk/.adf)",
-                                 padding=4)
-        sources.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        # --- sources ---
+        src = Panel(tab, self, "Sources · .dsk / .adf")
+        src.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.gtk_src_panel = src
+        self._gotek_src_buttons = tk.Frame(src.body, bg=t.panel, padx=10,
+                                           pady=10)
+        self._gotek_src_buttons.pack(side="bottom", fill="x")
+        tk.Frame(src.body, bg=t.dim, height=2).pack(side="bottom", fill="x")
+        holder = tk.Frame(src.body, bg=t.panel)
+        holder.pack(fill="both", expand=True, padx=6, pady=6)
         self.gtk_tree = ttk.Treeview(
-            sources, columns=("file", "size"), show="headings", height=10,
-            selectmode="extended")
-        self.gtk_tree.heading("file", text="Fichier")
-        self.gtk_tree.heading("size", text="Taille")
-        self.gtk_tree.column("file", width=380, anchor="w")
-        self.gtk_tree.column("size", width=80, anchor="e")
-        gs = ttk.Frame(sources)
-        gs.pack(side="left", fill="x", pady=(6, 0))
-        ttk.Button(gs, text="Ajouter…", command=self.gotek_add).pack(side="left", padx=2)
-        ttk.Button(gs, text="Retirer", command=self.gotek_remove).pack(side="left", padx=2)
-        ttk.Button(gs, text="Vider", command=self.gotek_clear).pack(side="left", padx=2)
-        top.columnconfigure(0, weight=2)
+            holder, columns=("num", "file", "size", "dest"), show="headings",
+            selectmode="extended", style="Pixel.Treeview")
+        for col, text, w, anchor in (("num", "N°", 44, "w"),
+                                     ("file", "SOURCE", 230, "w"),
+                                     ("size", "TAILLE", 90, "e"),
+                                     ("dest", "→ CLÉ USB", 150, "w")):
+            self.gtk_tree.heading(col, text=text, anchor=anchor)
+            self.gtk_tree.column(col, width=w, anchor=anchor,
+                                 stretch=col in ("file", "dest"))
+        gsb = ttk.Scrollbar(holder, orient="vertical",
+                            command=self.gtk_tree.yview,
+                            style="Pixel.Vertical.TScrollbar")
+        self.gtk_tree.configure(yscrollcommand=gsb.set)
+        self.gtk_tree.pack(side="left", fill="both", expand=True)
+        gsb.pack(side="right", fill="y")
+        self.gtk_tree.bind("<Delete>", lambda e: self.gotek_remove())
 
-        right = ttk.Frame(top)
-        right.pack(side="left", fill="both", expand=True)
-        top.columnconfigure(1, weight=1)
+        # état vide : disquette 3" pixel art
+        self.gtk_empty = tk.Frame(holder, bg=t.panel)
+        cv = tk.Canvas(self.gtk_empty, width=24 * 5, height=28 * 5,
+                       bg=t.panel, highlightthickness=0)
+        cv.pack(pady=(0, 18))
+        for x, y, w, h, key in FLOPPY:
+            cv.create_rectangle(x * 5, y * 5, (x + w) * 5, (y + h) * 5,
+                                fill=getattr(t, key), outline="")
+        self._label(self.gtk_empty, "AUCUNE DISQUETTE", font=self.f_head).pack()
+        self._label(self.gtk_empty,
+                    "Ajoutez des images .dsk ou .adf : elles seront\n"
+                    "numérotées dans l'ordre de la liste.",
+                    fg=t.hi, justify="center").pack(pady=(14, 0))
 
-        opts = ttk.LabelFrame(right, text="Options de nommage", padding=4)
-        opts.pack(side="top", fill="x")
-        self.gtk_pattern = tk.StringVar(value=DEFAULT_NAME_PATTERN)
-        self.gtk_subfolder = tk.StringVar(value="")
-        self.gtk_index = tk.IntVar(value=1)
-        ttk.Label(opts, text="Patron de noms:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(opts, textvariable=self.gtk_pattern, width=20).grid(
-            row=0, column=1, padx=4)
-        ttk.Label(opts, text="Sous-dossier:").grid(row=1, column=0, sticky="w")
-        ttk.Entry(opts, textvariable=self.gtk_subfolder, width=20).grid(
-            row=1, column=1, padx=4)
-        ttk.Label(opts, text="Index de départ:").grid(row=2, column=0, sticky="w")
-        ttk.Spinbox(opts, from_=0, to=999, textvariable=self.gtk_index,
-                    width=6).grid(row=2, column=1, sticky="w", padx=4)
+        gs = self._gotek_src_buttons
+        PixelButton(gs, self, "Ajouter…", kind="primary", icon="new",
+                    command=self.gotek_add).pack(side="left")
+        PixelButton(gs, self, "", icon="up", padx=10,
+                    command=lambda: self.gotek_move(-1)).pack(side="left",
+                                                              padx=(8, 0))
+        PixelButton(gs, self, "", icon="down", padx=10,
+                    command=lambda: self.gotek_move(1)).pack(side="left",
+                                                             padx=(6, 0))
+        PixelButton(gs, self, "Retirer", command=self.gotek_remove).pack(
+            side="left", padx=8)
+        PixelButton(gs, self, "Vider", kind="danger",
+                    command=self.gotek_clear).pack(side="left")
 
-        out = ttk.LabelFrame(right, text="Sortie (contenu de la clé USB)",
-                             padding=4)
-        out.pack(side="top", fill="x", pady=(6, 0))
-        self.gtk_outdir = tk.StringVar(value="")
-        ttk.Entry(out, textvariable=self.gtk_outdir, width=46).pack(
-            side="left", fill="x", expand=True)
-        ttk.Button(out, text="Choisir…", command=self.gotek_choose_outdir).pack(
-            side="left", padx=4)
+        # --- colonne droite ---
+        right = tk.Frame(tab, bg=t.paper)
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
-        acts = ttk.Frame(right)
-        acts.pack(side="top", fill="x", pady=(6, 0))
-        ttk.Button(acts, text="Générer le répertoire USB…",
-                   command=self.gotek_prepare).pack(side="left", padx=2)
-        ttk.Button(acts, text="Vérifier le dossier…",
-                   command=self.gotek_verify).pack(side="left", padx=2)
-        ttk.Button(acts, text="Image FAT (.img)…",
-                   command=self.gotek_fat_image).pack(side="left", padx=2)
+        opts = Panel(right, self, "Options de nommage")
+        opts.pack(fill="x")
+        g = tk.Frame(opts.body, bg=t.panel, padx=14, pady=8)
+        g.pack(fill="x")
 
-        res = ttk.LabelFrame(right, text="Résultat", padding=4)
-        res.pack(side="top", fill="both", expand=True, pady=(6, 0))
-        self.gtk_result = tk.Listbox(res, width=52, font=("Courier", 9))
+        def lab(text, row):
+            self._label(g, text, fg=t.acc, anchor="w").grid(
+                row=row, column=0, sticky="w", pady=3, padx=(0, 14))
+
+        lab("Patron de noms", 0)
+        self.entry(g, self.gtk_pattern, width=18).grid(row=0, column=1,
+                                                       sticky="w", pady=3)
+        lab("Sous-dossier", 1)
+        self.entry(g, self.gtk_subfolder, width=18).grid(row=1, column=1,
+                                                         sticky="w", pady=3)
+        lab("Index de départ", 2)
+        irow = tk.Frame(g, bg=t.panel)
+        irow.grid(row=2, column=1, sticky="w", pady=3)
+        self.entry(irow, self.gtk_index, width=5).pack(side="left")
+        PixelButton(irow, self, "", icon="down", padx=8,
+                    command=lambda: self._gotek_step(-1)).pack(side="left",
+                                                               padx=(8, 0))
+        PixelButton(irow, self, "", icon="up", padx=8,
+                    command=lambda: self._gotek_step(1)).pack(side="left",
+                                                              padx=(6, 0))
+        lab("Aperçu", 3)
+        self.gtk_preview = self._label(g, "", fg=t.hi, anchor="w")
+        self.gtk_preview.grid(row=3, column=1, sticky="w", pady=3)
+
+        out = Panel(right, self, "Sortie · clé USB")
+        out.pack(fill="x", pady=(16, 0))
+        orow = tk.Frame(out.body, bg=t.panel, padx=14, pady=12)
+        orow.pack(fill="x")
+        self.entry(orow, self.gtk_outdir, width=30).pack(side="left", fill="x",
+                                                         expand=True)
+        PixelButton(orow, self, "Choisir…", icon="open",
+                    command=self.gotek_choose_outdir).pack(side="left",
+                                                           padx=(10, 0))
+        acts = tk.Frame(out.body, bg=t.panel, padx=14)
+        acts.pack(fill="x", pady=(0, 12))
+        PixelButton(acts, self, "Générer le répertoire USB", kind="primary",
+                    command=self.gotek_prepare).pack(side="left")
+        acts2 = tk.Frame(out.body, bg=t.panel, padx=14)
+        acts2.pack(fill="x", pady=(0, 14))
+        PixelButton(acts2, self, "Vérifier le dossier",
+                    command=self.gotek_verify).pack(side="left")
+        PixelButton(acts2, self, "Image FAT (.img)",
+                    command=self.gotek_fat_image).pack(side="left", padx=10)
+
+        res = Panel(right, self, "Résultat", accent=t.ink)
+        res.pack(fill="both", expand=True, pady=(16, 0))
+        self.gtk_bar = tk.Canvas(res.body, height=26, bg=t.panel,
+                                 highlightthickness=0)
+        self.gtk_bar.pack(fill="x", padx=14, pady=(12, 6))
+        self.gtk_bar.bind("<Configure>", lambda e: self._draw_progress())
+        self.gtk_result = tk.Text(res.body, font=self.f_mono, wrap="none",
+                                  bg=t.panel, fg=t.ink, relief="flat", bd=0,
+                                  padx=14, pady=6, height=6, insertwidth=0,
+                                  highlightthickness=0, cursor="arrow",
+                                  selectbackground=t.ink,
+                                  selectforeground=t.paper)
+        for tag, col in (("arrow", t.acc), ("name", t.hi), ("ok", t.ink),
+                         ("err", t.danger), ("muted", t.acc)):
+            self.gtk_result.tag_configure(tag, foreground=col)
         self.gtk_result.pack(fill="both", expand=True)
+        self.gtk_result.config(state="disabled")
+
+        self._gotek_refresh_tree()
+        self._gotek_result_render()
+
+    # ------------------------------------------------------------------ #
+    def _gotek_names(self, n: int) -> List[str]:
+        """Aperçu des noms de sortie (patron de type « DISK%03d.adf »)."""
+        pat = self.gtk_pattern.get() or DEFAULT_NAME_PATTERN
+        try:
+            start = int(self.gtk_index.get())
+        except ValueError:
+            start = 1
+        sub = self.gtk_subfolder.get().strip("/")
+        names = []
+        for i in range(n):
+            try:
+                name = pat % (start + i)
+            except (TypeError, ValueError):
+                name = pat
+            names.append(f"{sub}/{name}" if sub else name)
+        return names
+
+    def _gotek_names_changed(self) -> None:
+        try:
+            self._gotek_refresh_tree()
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _gotek_step(self, d: int) -> None:
+        try:
+            v = int(self.gtk_index.get())
+        except ValueError:
+            v = 1
+        self.gtk_index.set(str(max(0, min(999, v + d))))
+
+    def _gotek_refresh_tree(self) -> None:
+        sel = [int(i) for i in self.gtk_tree.selection()]
+        self.gtk_tree.delete(*self.gtk_tree.get_children())
+        names = self._gotek_names(len(self._gotek_sources))
+        for i, p in enumerate(self._gotek_sources):
+            try:
+                size = _fmt_size(os.path.getsize(p))
+            except OSError:
+                size = "?"
+            self.gtk_tree.insert("", "end", iid=str(i),
+                                 values=(f"{i + 1:02d}", os.path.basename(p),
+                                         size, names[i]))
+        keep = [str(i) for i in sel if i < len(self._gotek_sources)]
+        if keep:
+            self.gtk_tree.selection_set(keep)
+        n = len(self._gotek_sources)
+        self.gtk_src_panel.head.config(
+            text=f"SOURCES · {n} IMAGE{'S' if n > 1 else ''}" if n
+            else "SOURCES · .DSK / .ADF")
+        if n:
+            self.gtk_empty.place_forget()
+        else:
+            self.gtk_empty.place(relx=0.5, rely=0.5, anchor="center")
+        prev = self._gotek_names(3)
+        self.gtk_preview.config(text=", ".join(prev) + "…")
 
     def _gotek_config(self) -> GotekConfig:
         try:
             return GotekConfig(
                 name_pattern=self.gtk_pattern.get() or DEFAULT_NAME_PATTERN,
                 subfolder=self.gtk_subfolder.get().strip("/"),
-                start_index=self.gtk_index.get(),
+                start_index=int(self.gtk_index.get()),
             )
         except Exception as exc:  # noqa: BLE001 — limite d'entrée GUI
-            raise GotekError(f"Options invalides: {exc}") from exc
+            raise GotekError(f"Options invalides : {exc}") from exc
 
     def _gotek_check(self) -> bool:
         if not self._gotek_sources:
-            messagebox.showinfo(
+            self.info_box(
                 "Sources vides",
                 "Ajoutez au moins une disquette (.dsk/.adf) dans la liste.")
             return False
         if not self.gtk_outdir.get().strip():
-            messagebox.showinfo(
+            self.info_box(
                 "Sortie manquante",
                 "Choisissez le répertoire de sortie (contenu de la clé USB).")
             return False
@@ -622,41 +1518,86 @@ class DskEditorApp:
         paths = filedialog.askopenfilenames(
             title="Disquettes à mettre sur la clé",
             filetypes=[("CPC DSK", "*.dsk *.adf"), ("Tous", "*.*")])
-        self.gotek_add_paths(paths)
+        if paths:
+            self.gotek_add_paths(list(paths))
 
     def gotek_add_paths(self, paths: List[str]) -> None:
         for p in paths:
             if p not in self._gotek_sources:
                 self._gotek_sources.append(p)
-        self.gtk_tree.delete(*self.gtk_tree.get_children())
-        for p in self._gotek_sources:
-            try:
-                size = os.path.getsize(p)
-            except OSError:
-                size = 0
-            self.gtk_tree.insert("", "end", values=(p, _fmt_size(size)))
-        self._set_status(f"Gotek: {len(self._gotek_sources)} source(s).")
+        self._gotek_refresh_tree()
+        self._set_status(f"Gotek : {len(self._gotek_sources)} source(s).")
 
     def gotek_remove(self) -> None:
-        for iid in self.gtk_tree.selection():
-            path = self.gtk_tree.item(iid, "values")[0]
-            if path in self._gotek_sources:
-                self._gotek_sources.remove(path)
-        self.gtk_tree.delete(*self.gtk_tree.selection())
+        idx = sorted((int(i) for i in self.gtk_tree.selection()), reverse=True)
+        for i in idx:
+            del self._gotek_sources[i]
+        self.gtk_tree.selection_set(())
+        self._gotek_refresh_tree()
+
+    def gotek_move(self, d: int) -> None:
+        sel = self.gtk_tree.selection()
+        if not sel:
+            return
+        i = int(sel[0])
+        j = i + d
+        if not 0 <= j < len(self._gotek_sources):
+            return
+        s = self._gotek_sources
+        s[i], s[j] = s[j], s[i]
+        self.gtk_tree.selection_set(())
+        self._gotek_refresh_tree()
+        self.gtk_tree.selection_set(str(j))
+        self.gtk_tree.see(str(j))
 
     def gotek_clear(self) -> None:
+        if self._gotek_sources and not self.ask(
+                "Vider", "Retirer toutes les sources de la liste ?",
+                danger=True):
+            return
         self._gotek_sources = []
-        self.gtk_tree.delete(*self.gtk_tree.get_children())
+        self._gotek_refresh_tree()
 
     def gotek_choose_outdir(self) -> None:
         d = filedialog.askdirectory(title="Répertoire de sortie (contenu de la clé)")
         if d:
             self.gtk_outdir.set(d)
 
-    def _gotek_result_show(self, lines: List[str]) -> None:
-        self.gtk_result.delete(0, "end")
-        for line in lines:
-            self.gtk_result.insert("end", line)
+    def _draw_progress(self) -> None:
+        t = self.t
+        c = self.gtk_bar
+        c.delete("all")
+        w = max(100, c.winfo_width())
+        n, gap = 28, 3
+        cell = (w - gap * (n - 1)) / n
+        lit = round(self._gtk_progress * n)
+        for i in range(n):
+            x = i * (cell + gap)
+            c.create_rectangle(x, 2, x + cell, 24,
+                               fill=t.ink if i < lit else t.dim, outline="")
+
+    def _gotek_result_show(self, lines: List[str], tag: str = "OK",
+                           progress: float = 1.0) -> None:
+        self._gtk_last = [(os.path.basename(str(x)), tag) for x in lines]
+        self._gtk_progress = progress
+        self._gotek_result_render()
+
+    def _gotek_result_render(self) -> None:
+        tx = self.gtk_result
+        tx.config(state="normal")
+        tx.delete("1.0", "end")
+        if not self._gtk_last:
+            tx.insert("end", "> En attente.\n", "muted")
+        for name, tag in self._gtk_last:
+            if tag == "ERR":
+                tx.insert("end", f"! {name}\n", "err")
+                continue
+            tx.insert("end", "> ", "arrow")
+            tx.insert("end", name + "  ", "name")
+            tx.insert("end", tag + "\n", "ok")
+        tx.insert("end", "\nReady\n", "ok")
+        tx.config(state="disabled")
+        self._draw_progress()
 
     def gotek_prepare(self) -> None:
         if not self._gotek_check():
@@ -666,31 +1607,33 @@ class DskEditorApp:
             created = prepare_usb_directory(
                 self.gtk_outdir.get().strip(), self._gotek_sources, config)
         except (GotekError, ADFError, OSError) as exc:
-            messagebox.showerror("Échec de la génération", str(exc))
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error("Échec de la génération", str(exc))
             return
         self._gotek_result_show(created)
         self._set_status(
-            f"Gotek: {len(created)} image(s) écrite(s) dans "
+            f"Gotek : {len(created)} image(s) écrite(s) dans "
             f"{self.gtk_outdir.get().strip()}")
 
     def gotek_verify(self) -> None:
         out = self.gtk_outdir.get().strip()
         if not out:
-            messagebox.showinfo("Vérification", "Choisissez d'abord le répertoire.")
+            self.info_box("Vérification", "Choisissez d'abord le répertoire.")
             return
         try:
             valid = verify_usb_directory(out)
         except (GotekError, ADFError, OSError) as exc:
-            messagebox.showerror("Vérification", str(exc))
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error("Vérification", str(exc))
             return
-        self._gotek_result_show([os.path.basename(p) for p in valid])
-        self._set_status(f"Gotek: {len(valid)} image(s) valide(s) dans {out}.")
+        self._gotek_result_show(valid, tag="VALIDE")
+        self._set_status(f"Gotek : {len(valid)} image(s) valide(s) dans {out}.")
 
     def gotek_fat_image(self) -> None:
         # Le répertoire « Sortie » n'est PAS requis ici (il ne sert qu'au
         # générer/vérifier) : le dialogue de sauvegarde donne le .img.
         if not self._gotek_sources:
-            messagebox.showinfo(
+            self.info_box(
                 "Sources vides",
                 "Ajoutez au moins une disquette (.dsk/.adf) dans la liste.")
             return
@@ -704,12 +1647,14 @@ class DskEditorApp:
             config = self._gotek_config()
             create_fat_image(out_img, self._gotek_sources, config)
         except GotekError as exc:
-            messagebox.showinfo("Image FAT", str(exc))
+            self.info_box("Image FAT", str(exc))
             return
         except (OSError, ADFError) as exc:
-            messagebox.showerror("Échec de l'image FAT", str(exc))
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error("Échec de l'image FAT", str(exc))
             return
-        self._set_status(f"Gotek: image FAT créée: {out_img}")
+        self._gotek_result_show([out_img], tag="IMAGE FAT OK")
+        self._set_status(f"Gotek : image FAT créée : {out_img}")
 
     # ================================================================== #
     # Glisser-déposer (explorateur Windows)
@@ -726,20 +1671,19 @@ class DskEditorApp:
         others = [p for p in paths if p not in disks]
 
         if disks:
-            if self.notebook.index(self.notebook.select()) == 1:
+            if self._tab == 1:
                 self.gotek_add_paths(disks)
                 return
             if self.disk is None:
                 self._open_path(disks[0])
             else:
                 self.gotek_add_paths(disks)
-                self.notebook.select(self.tab_gotek)
+                self._show_tab(1)
                 return
 
         for p in others:
             if self.disk is None:
-                messagebox.showinfo(
-                    "Ajout", "Créez ou ouvrez d'abord une disquette.")
+                self.info_box("Ajout", "Créez ou ouvrez d'abord une disquette.")
                 return
             self._do_add_file(p)
 
@@ -747,10 +1691,28 @@ class DskEditorApp:
     # Divers
     # ================================================================== #
     def _set_status(self, text: str) -> None:
-        self.status.config(text=text)
+        self._status_text = text
+        try:
+            self.status.config(text=text)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def info_box(self, title: str, message: str) -> None:
+        PixelDialog(self, title, message, kind="info")
+
+    def error(self, title: str, message: str) -> None:
+        PixelDialog(self, title, message, kind="error")
+
+    def ask(self, title: str, message: str, danger: bool = False) -> bool:
+        yes = ("Oui, effacer", True, "danger") if danger else ("Oui", True, "primary")
+        dlg = PixelDialog(self, title, message,
+                          kind="danger" if danger else "ask",
+                          buttons=(("Non", False, "normal"), yes))
+        return bool(dlg.result)
 
 
 def run() -> None:
+    _load_private_fonts()
     root = tk.Tk()
     DskEditorApp(root)
     root.mainloop()
