@@ -140,9 +140,9 @@ class AddFileDialog:
         self.name = tk.StringVar(value=default_name)
         self.ftype = tk.StringVar(value="binary")
         self.load = tk.StringVar(value="0x4000")
-        # AMSDOS d'abord (émulateurs + longueurs exactes) ; « both » pour
-        # un disque lisible aussi par le vrai DOS/Gotek.
-        self.fs = tk.StringVar(value="amsdos")
+        # Filer d'abord (DOS d'origine, lu par le Gotek sur matériel réel) ;
+        # « both » pour un disque lisible aussi par les émulateurs AMSDOS.
+        self.fs = tk.StringVar(value="filer")
 
         ttk.Label(frm, text="Nom sur la disquette (8.3):").grid(
             row=0, column=0, sticky="w", pady=2)
@@ -162,7 +162,7 @@ class AddFileDialog:
         ttk.Label(frm, text="Couche(s) d'écriture:").grid(
             row=3, column=0, sticky="w", pady=2)
         ttk.Combobox(frm, textvariable=self.fs, width=14, state="readonly",
-                     values=["amsdos", "both", "filer"]).grid(
+                     values=["filer", "both", "amsdos"]).grid(
             row=3, column=1, padx=6, pady=2)
 
         btns = ttk.Frame(frm)

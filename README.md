@@ -102,8 +102,8 @@ Deux onglets :
 
 - **Disquette (.dsk)** : ouvrir / créer / sauvegarder, liste des fichiers
   avec leur couche (`FILER` / `AMSDOS`), ajout d'un fichier local (nom 8.3
-  **préserver l'extension**, type, adresse de chargement, couche `amsdos`
-  par défaut / `both` / `filer`), extraction (le nom proposé retrouve son
+  **préserver l'extension**, type, adresse de chargement, couche `filer`
+  par défaut / `both` / `amsdos`), extraction (le nom proposé retrouve son
   extension), suppression, hexdumper de fichier ou de secteur brut.
 - **Gotek (clé USB)** : pile de sources `.dsk`/`.adf`, options de nommage
   (`DISK%03d.adf`, sous-dossier, index de départ), génération du répertoire à
