@@ -93,6 +93,22 @@ Deux onglets :
   copier sur la clé, vérification des images, et création d'une image FAT
   complète quand `mformat`/`mkfs.fat` est disponible.
 
+## Exécutable autonome (PyInstaller)
+
+L'application peut être livrée sans Python ni installation :
+
+- **Windows** : depuis un PC Windows (Python 3.10+ requis pour la seule
+  génération), lancer `build_exe.bat` → produit `dist\cpc-dsk-gui.exe`.
+- **Linux / WSL** :
+  ```bash
+  python3 -m pip install pyinstaller
+  python3 -m PyInstaller --onefile --windowed --name cpc-dsk-gui run_gui.py
+  ```
+  → produit `dist/cpc-dsk-gui`.
+
+L'exécutable embarque Python + tkinter : il s'ouvre directement sur la
+machine cible (testé sous WSL).
+
 ## Utilisation (CLI)
 
 ```bash

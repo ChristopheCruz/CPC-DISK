@@ -21,6 +21,10 @@ env/
 .coverage
 htmlcov/
 
+# Exécutables PyInstaller
+*.spec
+*.exe
+
 # Images disque générées (à ne pas committer)
 *.dsk
 *.adf
