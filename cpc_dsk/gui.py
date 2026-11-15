@@ -17,7 +17,7 @@ Habillage :
   le dossier ``fonts/`` voisin de ce fichier (repli automatique sur une
   police à chasse fixe si elles sont absentes).
 
-Raccourcis : F1/F2 onglets, F3 moniteur, Ctrl+O ouvrir, Ctrl+N nouveau,
+Raccourcis : F1/F2 onglets, F3 moniteur, F4 vue fichiers/secteurs, Ctrl+O ouvrir, Ctrl+N nouveau,
 Ctrl+S sauver.
 
 Lancement:
@@ -542,10 +542,13 @@ class DskEditorApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("CPC Disk Editor — Disquettes .dsk & Gotek")
+        self.scale = max(1.0, root.winfo_fpixels("1i") / 96)  # 1.25 à 125 %
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        w, h = min(1440, sw - 60), min(960, sh - 90)
+        w = min(round(1440 * self.scale), sw - 60)
+        h = min(round(960 * self.scale), sh - 90)
         self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
-        self.root.minsize(min(1120, sw - 40), min(740, sh - 60))
+        self.root.minsize(min(round(1120 * self.scale), sw - 40),
+                          min(round(740 * self.scale), sh - 60))
 
         # --- état (survit aux changements de thème) ---
         self.disk: Optional[ADFDisk] = None
@@ -566,6 +569,8 @@ class DskEditorApp:
         self._blink_id: Optional[str] = None
 
         self.sector_var = tk.StringVar(value="0 0")
+        self.left_view = tk.StringVar(value="files")  # "files" | "map"
+        self.left_view.trace_add("write", lambda *a: self._show_left_view())
         self.gtk_pattern = tk.StringVar(value=DEFAULT_NAME_PATTERN)
         self.gtk_subfolder = tk.StringVar(value="")
         self.gtk_index = tk.StringVar(value="1")
@@ -580,6 +585,7 @@ class DskEditorApp:
         root.bind_all("<F1>", lambda e: self._show_tab(0))
         root.bind_all("<F2>", lambda e: self._show_tab(1))
         root.bind_all("<F3>", lambda e: self.toggle_monitor())
+        root.bind_all("<F4>", lambda e: self.toggle_left_view())
         root.bind_all("<Control-o>", lambda e: self.open_disk())
         root.bind_all("<Control-n>", lambda e: self.new_disk())
         root.bind_all("<Control-s>", lambda e: self.save_disk())
@@ -605,23 +611,29 @@ class DskEditorApp:
         has_body = PIXEL_BODY in families
         self.pixel_fonts = has_title and has_body
         self.has_title_font = has_title
-        # Tailles négatives = pixels (rendu net des polices pixel).
+        def px8(base: float) -> int:
+            # Press Start 2P : toujours un multiple de 8 px (8, 16, 24, 32…)
+            return -8 * max(1, round(base * self.scale / 8))
+
+        def px(base: float) -> int:
+            return -round(base * self.scale)
+
         if has_title:
-            self.f_title = tkfont.Font(family=PIXEL_TITLE, size=-22)
-            self.f_head = tkfont.Font(family=PIXEL_TITLE, size=-11)
-            self.f_btn = tkfont.Font(family=PIXEL_TITLE, size=-11)
+            self.f_title = tkfont.Font(family=PIXEL_TITLE, size=px8(22))
+            self.f_head = tkfont.Font(family=PIXEL_TITLE, size=px8(13))
+            self.f_btn = tkfont.Font(family=PIXEL_TITLE, size=px8(13))
         else:
-            self.f_title = tkfont.Font(family=mono, size=-26, weight="bold")
-            self.f_head = tkfont.Font(family=mono, size=-14, weight="bold")
-            self.f_btn = tkfont.Font(family=mono, size=-14, weight="bold")
+            self.f_title = tkfont.Font(family=mono, size=px(26), weight="bold")
+            self.f_head = tkfont.Font(family=mono, size=px(14), weight="bold")
+            self.f_btn = tkfont.Font(family=mono, size=px(14), weight="bold")
         if has_body:
-            self.f_body = tkfont.Font(family=PIXEL_BODY, size=-22)
-            self.f_mono = tkfont.Font(family=PIXEL_BODY, size=-21)
-            self.f_small = tkfont.Font(family=PIXEL_BODY, size=-16)
+            self.f_body = tkfont.Font(family=PIXEL_BODY, size=px(22))
+            self.f_mono = tkfont.Font(family=PIXEL_BODY, size=px(21))
+            self.f_small = tkfont.Font(family=PIXEL_BODY, size=px(16))
         else:
-            self.f_body = tkfont.Font(family=mono, size=-16)
-            self.f_mono = tkfont.Font(family=mono, size=-15)
-            self.f_small = tkfont.Font(family=mono, size=-12)
+            self.f_body = tkfont.Font(family=mono, size=px(16))
+            self.f_mono = tkfont.Font(family=mono, size=px(15))
+            self.f_small = tkfont.Font(family=mono, size=px(12))
 
     def caps(self, text: str) -> str:
         """Majuscules ; sans accents avec Press Start 2P, qui n'a pas de
@@ -737,7 +749,7 @@ class DskEditorApp:
         foot.pack(side="bottom", fill="x")
         tk.Frame(foot, bg=t.ink, height=4).pack(fill="x", pady=(10, 8))
         self.status = self._label(foot, self._status_text, fg=t.hi,
-                                  anchor="w", justify="left")
+                                  anchor="w", justify="left", width=1)
         self.status.pack(side="left", fill="x", expand=True)
         self.ready = self._label(foot, "Ready █")
         self.ready.pack(side="right")
@@ -751,6 +763,23 @@ class DskEditorApp:
         self._build_disk_tab()
         self._build_gotek_tab()
         self._show_tab(self._tab)
+
+    def _show_left_view(self) -> None:
+        """Colonne gauche de l'onglet Disquette : catalogue OU carte."""
+        try:
+            files, mp = self.files_panel, self.map_panel
+            if self.left_view.get() == "map":
+                files.pack_forget()
+                mp.pack(side="top", fill="both", expand=True)
+                self.root.after_idle(self._draw_map)
+            else:
+                mp.pack_forget()
+                files.pack(side="top", fill="both", expand=True)
+        except (AttributeError, tk.TclError):
+            pass
+
+    def toggle_left_view(self) -> None:
+        self.left_view.set("map" if self.left_view.get() == "files" else "files")
 
     def _show_tab(self, i: int) -> None:
         t = self.t
@@ -809,11 +838,17 @@ class DskEditorApp:
 
         # --- colonne gauche : catalogue + carte ---
         leftcol = tk.Frame(pane, bg=t.paper)
+        vbar = tk.Frame(leftcol, bg=t.paper)
+        vbar.pack(side="top", fill="x", pady=(0, 10))
+        self._label(vbar, "VUE", fg=t.acc, font=self.f_head).pack(
+            side="left", padx=(0, 10))
+        Segmented(vbar, self, self.left_view,
+                  [("files", "Fichiers"), ("map", "Secteurs")]).pack(side="left")
+        self._label(vbar, "F4", fg=t.acc, font=self.f_small).pack(
+            side="left", padx=(4, 0))
         mp = Panel(leftcol, self, "Carte des secteurs")
-        mp.pack(side="bottom", fill="x", pady=(16, 0))
         files = Panel(leftcol, self, "Cat · Filer + AMSDOS")
-        files.pack(side="top", fill="both", expand=True)
-        self.files_panel = files
+        self.files_panel, self.map_panel = files, mp
         actions = tk.Frame(files.body, bg=t.panel, padx=10, pady=10)
         actions.pack(side="bottom", fill="x")
         tk.Frame(files.body, bg=t.dim, height=2).pack(side="bottom", fill="x")
@@ -839,12 +874,12 @@ class DskEditorApp:
         self.tree.bind("<<TreeviewSelect>>", self._on_file_select)
         self.tree.bind("<Delete>", lambda e: self.delete_file())
 
-        PixelButton(actions, self, "Ajouter…", icon="new",
+        PixelButton(actions, self, "Ajouter", icon="new", padx=12,
                     command=self.add_file).pack(side="left")
-        PixelButton(actions, self, "Extraire…", icon="extract",
+        PixelButton(actions, self, "Extraire", icon="extract", padx=12,
                     command=self.extract_file).pack(side="left", padx=8)
         PixelButton(actions, self, "Supprimer", kind="danger", icon="trash",
-                    command=self.delete_file).pack(side="right")
+                    padx=12, command=self.delete_file).pack(side="right")
 
         self.map_title = mp.head
         self.map_canvas = tk.Canvas(mp.body, bg=t.panel, height=170,
@@ -861,7 +896,8 @@ class DskEditorApp:
             tk.Frame(legend, bg=color, width=14, height=14).pack(side="left")
             self._label(legend, text, fg=t.hi, font=self.f_small).pack(
                 side="left", padx=(6, 16))
-        pane.add(leftcol, minsize=520, width=600, stretch="always")
+        pane.add(leftcol, minsize=600, width=620, stretch="always")
+        self._show_left_view()
 
         # --- colonne droite : hexadécimal ---
         hexp = Panel(pane, self, "Contenu · hex", accent=t.ink)
@@ -1300,8 +1336,8 @@ class DskEditorApp:
     def _build_gotek_tab(self) -> None:
         t = self.t
         tab = self.tab_gotek
-        tab.columnconfigure(0, weight=1, uniform="g")
-        tab.columnconfigure(1, weight=1, uniform="g")
+        tab.columnconfigure(0, weight=4, uniform="g")
+        tab.columnconfigure(1, weight=5, uniform="g")
         tab.rowconfigure(0, weight=1)
 
         # --- sources ---
@@ -1347,7 +1383,7 @@ class DskEditorApp:
                     fg=t.hi, justify="center").pack(pady=(14, 0))
 
         gs = self._gotek_src_buttons
-        PixelButton(gs, self, "Ajouter…", kind="primary", icon="new",
+        PixelButton(gs, self, "Ajouter", kind="primary", icon="new", padx=12,
                     command=self.gotek_add).pack(side="left")
         PixelButton(gs, self, "", icon="up", padx=10,
                     command=lambda: self.gotek_move(-1)).pack(side="left",
@@ -1355,14 +1391,33 @@ class DskEditorApp:
         PixelButton(gs, self, "", icon="down", padx=10,
                     command=lambda: self.gotek_move(1)).pack(side="left",
                                                              padx=(6, 0))
-        PixelButton(gs, self, "Retirer", command=self.gotek_remove).pack(
+        PixelButton(gs, self, "Retirer", padx=12, command=self.gotek_remove).pack(
             side="left", padx=8)
-        PixelButton(gs, self, "Vider", kind="danger",
+        PixelButton(gs, self, "Vider", kind="danger", padx=12,
                     command=self.gotek_clear).pack(side="left")
 
         # --- colonne droite ---
         right = tk.Frame(tab, bg=t.paper)
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+        res = Panel(right, self, "Résultat", accent=t.ink)
+        res.pack(side="bottom", fill="both", expand=True, pady=(16, 0))
+        self.gtk_bar = tk.Canvas(res.body, height=26, bg=t.panel,
+                                 highlightthickness=0)
+        self.gtk_bar.pack(fill="x", padx=14, pady=(12, 6))
+        self.gtk_bar.bind("<Configure>", lambda e: self._draw_progress())
+        self.gtk_result = tk.Text(res.body, font=self.f_mono, wrap="none",
+                                  bg=t.panel, fg=t.ink, relief="flat", bd=0,
+                                  padx=14, pady=6, height=4, insertwidth=0,
+                                  highlightthickness=0, cursor="arrow",
+                                  selectbackground=t.ink,
+                                  selectforeground=t.paper)
+        for tag, col in (("arrow", t.acc), ("name", t.hi), ("ok", t.ink),
+                         ("err", t.danger), ("muted", t.acc)):
+            self.gtk_result.tag_configure(tag, foreground=col)
+        self.gtk_result.pack(fill="both", expand=True)
+        self.gtk_result.config(state="disabled")
+
 
         opts = Panel(right, self, "Options de nommage")
         opts.pack(fill="x")
@@ -1403,33 +1458,13 @@ class DskEditorApp:
                     command=self.gotek_choose_outdir).pack(side="left",
                                                            padx=(10, 0))
         acts = tk.Frame(out.body, bg=t.panel, padx=14)
-        acts.pack(fill="x", pady=(0, 12))
-        PixelButton(acts, self, "Générer le répertoire USB", kind="primary",
+        acts.pack(fill="x", pady=(0, 14))
+        PixelButton(acts, self, "Générer USB", kind="primary", padx=12,
                     command=self.gotek_prepare).pack(side="left")
-        acts2 = tk.Frame(out.body, bg=t.panel, padx=14)
-        acts2.pack(fill="x", pady=(0, 14))
-        PixelButton(acts2, self, "Vérifier le dossier",
-                    command=self.gotek_verify).pack(side="left")
-        PixelButton(acts2, self, "Image FAT (.img)",
-                    command=self.gotek_fat_image).pack(side="left", padx=10)
-
-        res = Panel(right, self, "Résultat", accent=t.ink)
-        res.pack(fill="both", expand=True, pady=(16, 0))
-        self.gtk_bar = tk.Canvas(res.body, height=26, bg=t.panel,
-                                 highlightthickness=0)
-        self.gtk_bar.pack(fill="x", padx=14, pady=(12, 6))
-        self.gtk_bar.bind("<Configure>", lambda e: self._draw_progress())
-        self.gtk_result = tk.Text(res.body, font=self.f_mono, wrap="none",
-                                  bg=t.panel, fg=t.ink, relief="flat", bd=0,
-                                  padx=14, pady=6, height=6, insertwidth=0,
-                                  highlightthickness=0, cursor="arrow",
-                                  selectbackground=t.ink,
-                                  selectforeground=t.paper)
-        for tag, col in (("arrow", t.acc), ("name", t.hi), ("ok", t.ink),
-                         ("err", t.danger), ("muted", t.acc)):
-            self.gtk_result.tag_configure(tag, foreground=col)
-        self.gtk_result.pack(fill="both", expand=True)
-        self.gtk_result.config(state="disabled")
+        PixelButton(acts, self, "Vérifier", padx=12,
+                    command=self.gotek_verify).pack(side="left", padx=8)
+        PixelButton(acts, self, "Image FAT", padx=12,
+                    command=self.gotek_fat_image).pack(side="left")
 
         self._gotek_refresh_tree()
         self._gotek_result_render()
@@ -1712,6 +1747,15 @@ class DskEditorApp:
 
 
 def run() -> None:
+    if sys.platform == "win32":
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # Windows 8.1+
+        except Exception:  # noqa: BLE001
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()   # Windows 7
+            except Exception:  # noqa: BLE001
+                pass
     _load_private_fonts()
     root = tk.Tk()
     DskEditorApp(root)
