@@ -46,6 +46,17 @@ La taille d'un bloc piste (donnée dans le tableau des pistes) est un multiple
 de 256 ; les données de secteurs occupent ``taille_piste - 256`` octets, soit
 ``nb_secteurs`` secteurs de ``(taille_piste-256)/nb_secteurs`` octets chacun
 (par ex. 9 secteurs × 512 o = 4608 o, bloc de 4864 o).
+
+Variantes SAM / WinAPE (tolérées)
+---------------------------------
+
+- le tableau des pistes peut être **complété à zéro** au-delà du nombre de
+  pistes réelles (le champ 0x30 peut les compter) ; le premier zéro marque la
+  fin des pistes ;
+- une **traînée** (section ``Offset-Info``) peut suivre la dernière piste ;
+  elle est conservée en l'état à l'enregistrement ;
+- la taille des secteurs varie par piste (ex. piste 0 = 9 × 512 o, les autres
+  = 15 × 256 o).
 """
 
 from __future__ import annotations
@@ -118,10 +129,21 @@ class ADFDisk:
             raise ADFError("Nombre de pistes nul dans le Disk-Info.")
 
         if self.extended:
-            self.track_sizes = [
-                raw[EXT_TRACK_SIZE_TABLE_OFFSET + t] * 256
+            table = [
+                raw[EXT_TRACK_SIZE_TABLE_OFFSET + t]
                 for t in range(self.num_tracks)
             ]
+            # Certains outils (SAM / WinAPE) déclarent plus de pistes que le
+            # fichier n'en contient : le tableau est complété à zéro (ex. 42
+            # pistes déclarées pour 39 pistes réelles). Le premier zéro marque
+            # la fin des pistes réelles (une piste de 0 o est invalide).
+            n = len(table)
+            for i, b in enumerate(table):
+                if b == 0:
+                    n = i
+                    break
+            self.num_tracks = n
+            self.track_sizes = [b * 256 for b in table[:n]]
         else:
             ts = raw[STD_TRACK_SIZE_OFFSET] | (raw[STD_TRACK_SIZE_OFFSET + 1] << 8)
             self.track_sizes = [ts] * self.num_tracks
@@ -134,10 +156,13 @@ class ADFDisk:
                 raise ADFError("Taille de piste invalide (<= 256 o).")
             self.track_offsets.append(off)
             off += sz
-        if off != len(raw):
+        if off > len(raw):
             raise ADFError(
-                f"Taille de fichier incohérente: {len(raw)} o, attendu {off} "
+                f"Fichier tronqué: {len(raw)} o, au moins {off} o attendus "
                 f"selon le Disk-Info.")
+        # Des octets après la dernière piste = traînée de fin de fichier
+        # (section « Offset-Info » produite par SAM / WinAPE) ; elle est
+        # conservée à l'enregistrement.
 
     # ------------------------------------------------------------------ #
     # Persistance

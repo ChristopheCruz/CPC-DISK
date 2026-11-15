@@ -23,6 +23,7 @@ AmstradCPC/
 │   │   └── gotek.py   #   Préparation de l'image USB pour Gotek
 │   ├── cli.py         # Interface en ligne de commande
 │   └── gui.py         # Interface graphique (tkinter)
+├── test_disks/        # Disquettes de test (3 réelles d'époque + 2 générées)
 ├── tests/
 ├── pyproject.toml
 └── README.md
@@ -38,6 +39,10 @@ AmstradCPC/
   données de secteurs contiguës.
 - Géométrie type : 40 pistes × 1 face, bloc de 4864 o (9 secteurs × **512 o**)
   → fichier de 194 816 o, identique à une disquette CPC réelle.
+- **Variantes SAM / WinAPE tolérées** (vérifiées sur `test_disks/abbey.dsk`) :
+  tableau des pistes complété à zéro (premier zéro = fin des pistes réelles),
+  traînée `Offset-Info` en fin de fichier (conservée à la sauvegarde),
+  taille de secteur variable par piste (ex. 15 × 256 o).
 
 ### Répertoires et fichiers
 
@@ -119,6 +124,15 @@ L'application peut être livrée sans Python ni installation :
 L'exécutable embarque Python + tkinter : il s'ouvre directement sur la
 machine cible (testé sous WSL).
 
+## Disquettes de test
+
+Le dossier `test_disks/` contient 5 disquettes prêtes à l'emploi
+(3 réelles d'époque + 2 générées par l'outil) : `greed.dsk`, `robot.dsk`,
+`abbey.dsk`, `vierge.dsk`, `demo_edition.dsk`. Voir
+[`test_disks/README.md`](test_disks/README.md) pour le contenu de chacune et
+un scénario de test complet (listage, extraction, suppression, protection
+des disques ambigus, onglet Gotek).
+
 ## Utilisation (CLI)
 
 ```bash
@@ -178,11 +192,13 @@ création optionnelle d'une image FAT complète (nécessite `mformat` ou
 ## Validation du format
 
 - Le conteneur, le répertoire Filer et les fichiers AMSDOS sont **testés**
-  (`pytest`, 28 tests) et **vérifiés sur des disquettes réelles** :
+  (`pytest`, 31 tests) et **vérifiés sur des disquettes réelles** :
   - `greed.dsk` (*Yogi Bear*) : 4 fichiers Filer (768 / 25344 / 40960 / 7680 o)
     + 4 objets AMSDOS,
   - `robot.dsk` (*Robot PD 14400*) : 10 fichiers Filer en 12 entrées
-    (chunks de 16 Ko, compteur d'allocation 0x02..0x81) + 2 objets AMSDOS.
+    (chunks de 16 Ko, compteur d'allocation 0x02..0x81) + 2 objets AMSDOS,
+  - `abbey.dsk` : disque de boot SAM/WinAPE — variante du conteneur
+    (39/42 pistes, secteurs 256 o, traînée `Offset-Info`).
 - Un aller-retour **écriture → relecture** est vérifié (modes `filer` et
   `both`), ainsi que la suppression avec recollage du paquet.
 
