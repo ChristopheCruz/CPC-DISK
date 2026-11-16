@@ -79,6 +79,27 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - **Glisser-déposer** depuis l'explorateur Windows.
 - Compatible **haute résolution** : les polices pixel restent nettes à 125 %, 150 % et au-delà.
 
+L'interface dans les deux autres langues (le visuel ci-dessus est en français) :
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshot-en.png" width="49%"></td>
+    <td align="center"><img src="docs/screenshot-gotek-en.png" width="49%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Anglais — onglet Disquette</em></td>
+    <td align="center"><em>Anglais — onglet Gotek</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshot-es.png" width="49%"></td>
+    <td align="center"><img src="docs/screenshot-gotek-es.png" width="49%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Espagnol — onglet Disquette</em></td>
+    <td align="center"><em>Espagnol — onglet Gotek</em></td>
+  </tr>
+</table>
+
 ## Installation
 
 Python 3.8 ou plus récent suffit. `tkinter` est fourni avec Python sous Windows et macOS.

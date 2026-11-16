@@ -81,6 +81,27 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 - **Drag & drop** from the Windows Explorer.
 - **Hi-DPI friendly**: pixel fonts stay crisp at 125 %, 150 % and beyond.
 
+The interface in the other two languages (the banner above is French):
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshot-en.png" width="49%"></td>
+    <td align="center"><img src="docs/screenshot-gotek-en.png" width="49%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>English — diskette tab</em></td>
+    <td align="center"><em>English — Gotek tab</em></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshot-es.png" width="49%"></td>
+    <td align="center"><img src="docs/screenshot-gotek-es.png" width="49%"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Spanish — diskette tab</em></td>
+    <td align="center"><em>Spanish — Gotek tab</em></td>
+  </tr>
+</table>
+
 ## Installation
 
 Python 3.8 or newer is all you need. `tkinter` ships with Python on Windows and macOS.
