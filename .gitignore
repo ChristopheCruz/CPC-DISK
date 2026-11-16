@@ -38,6 +38,9 @@ cpc_tools/
 # Disquettes de test (committées pour tester)
 !test_disks/*.dsk
 
+# Image de référence CP/M 2.2 (indispensable au générateur de disques)
+!cpc_dsk/data/cpm22_system.bin
+
 # OS
 .DS_Store
 Thumbs.db

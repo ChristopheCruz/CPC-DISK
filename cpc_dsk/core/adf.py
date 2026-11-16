@@ -74,7 +74,7 @@ Variantes SAM / WinAPE (tolérées)
 from __future__ import annotations
 
 import os
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 # --- Constantes du format (point unique d'ajustement) ---
 MAGIC_EXTENDED = b"EXTENDED CPC DSK File\r\nDisk-Info\r\n"
@@ -160,12 +160,16 @@ class ADFDisk:
             ts = raw[STD_TRACK_SIZE_OFFSET] | (raw[STD_TRACK_SIZE_OFFSET + 1] << 8)
             self.track_sizes = [ts] * self.num_tracks
 
-        # Offsets cumulés des blocs piste.
+        # Offsets cumulés des blocs piste. Une piste peut ne porter que son
+        # en-tête Track-Info (taille = 256 o, 0 secteur de données) : c'est
+        # le cas des pistes « vides » que certains outils (CPCDiskXP)
+        # laissent à la fin du tableau (table = 0x01). On l'accepte ; on
+        # rejette seulement une taille strictement inférieure.
         self.track_offsets = []
         off = DISK_INFO_SIZE
         for sz in self.track_sizes:
-            if sz <= TRACK_INFO_SIZE:
-                raise ADFError("Taille de piste invalide (<= 256 o).")
+            if sz < TRACK_INFO_SIZE:
+                raise ADFError("Taille de piste invalide (< 256 o).")
             self.track_offsets.append(off)
             off += sz
         if off > len(raw):
@@ -199,12 +203,20 @@ class ADFDisk:
                   sides: int = 1,
                   sectors: int = 9,
                   sector_size: int = 512,
-                  creator: str = "cpc-dsk v0.1") -> "ADFDisk":
+                  creator: str = "cpc-dsk v0.1",
+                  sector_ids: Optional[Tuple[int, ...]] = None,
+                  gap3: int = 0x52) -> "ADFDisk":
         """Crée une disquette vierge au format Extended.
 
         Par défaut, géométrie identique à une disquette CPC réelle (40 pistes,
-        1 face, 9 secteurs × 512 o). La taille de bloc doit être un multiple de
-        256 (256 + secteurs×taille_secteur).
+        1 face, 9 secteurs × 512 o, IDs C1 C6 C2 C7 C3 C8 C4 C9 C5, gap3 0x52).
+        La taille de bloc doit être un multiple de 256 (256 +
+        secteurs×taille_secteur).
+
+        ``sector_ids`` : IDs de secteur personnalisés (les disques CP/M 2.2
+        utilisent &41..&49, cf. :mod:`cpc_dsk.core.cpm`) ; au-delà du nombre
+        fourni, les IDs reprennent la séquence 0xC0+i+1. ``gap3`` : valeur du
+        champ gap3 des Track-Info (0x2A sur les disques CP/M réels).
         """
         if tracks <= 0 or sides <= 0 or sectors <= 0 or sector_size <= 0:
             raise ADFError("Géométrie invalide.")
@@ -228,7 +240,8 @@ class ADFDisk:
             header[EXT_TRACK_SIZE_TABLE_OFFSET + t] = track_byte
 
         # Blocs piste — chaque en-tête Track-Info reproduit la structure des
-        # disquettes réelles (vérifiée sur greed.dsk/robot.dsk) :
+        # disquettes réelles (vérifiée sur greed.dsk/robot.dsk/cpm22.dsk) :
+        #   0x10 = n° de piste,
         #   0x14 = taille secteur (128<<n), 0x15 = nb de secteurs,
         #   0x16 = gap3, 0x17 = octet de remplissage,
         #   0x18 + i×8 = enregistrement secteur (c, h, r, n, st1, st2, len LE16).
@@ -237,19 +250,22 @@ class ADFDisk:
         # formatage réel (le répertoire Filer vide est aussi 0xE5).
         # Code de taille : 128<<n (128/256/512 -> 0/1/2).
         size_shift = (sector_size // 128).bit_length() - 1
-        sec_ids_9 = (0xC1, 0xC6, 0xC2, 0xC7, 0xC3, 0xC8, 0xC4, 0xC9, 0xC5)
+        sec_ids = (tuple(sector_ids)
+                   if sector_ids is not None
+                   else (0xC1, 0xC6, 0xC2, 0xC7, 0xC3, 0xC8, 0xC4, 0xC9, 0xC5))
         blocks = bytearray()
         for t in range(tracks):
             ti = bytearray(TRACK_INFO_SIZE)
             ti[0:len(TRACK_INFO_MAGIC)] = TRACK_INFO_MAGIC
+            ti[0x10] = t  # n° de piste (champ présent sur les disques réels)
             ti[0x14] = size_shift
             ti[TRACK_INFO_NUM_SECTORS_OFFSET] = sectors
-            ti[0x16] = 0x52  # gap3 (valeur observée sur greed.dsk)
+            ti[0x16] = gap3  # valeur observée sur les disques réels
             ti[0x17] = 0xE5  # octet de remplissage
             for i in range(sectors):
                 rec = bytearray(8)
                 rec[0] = t
-                rec[2] = (sec_ids_9[i] if i < len(sec_ids_9) else 0xC0 + i + 1)
+                rec[2] = sec_ids[i] if i < len(sec_ids) else 0xC0 + i + 1
                 rec[3] = size_shift
                 rec[6] = sector_size & 0xFF
                 rec[7] = (sector_size >> 8) & 0xFF

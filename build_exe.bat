@@ -8,7 +8,7 @@ rem  L'executable est genere dans dist\
 rem ============================================================
 
 python -m pip install --upgrade pyinstaller
-python -m PyInstaller --onefile --windowed --clean --name cpc-dsk-gui run_gui.py
+python -m PyInstaller --onefile --windowed --clean --name cpc-dsk-gui run_gui.py --add-data "cpc_dsk\fonts;cpc_dsk/fonts" --add-data "cpc_dsk\data;cpc_dsk/data" --add-data "cpc_dsk\icon.ico;cpc_dsk"
 
 if exist dist\cpc-dsk-gui.exe (
     echo.

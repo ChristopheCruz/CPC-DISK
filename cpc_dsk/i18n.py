@@ -78,6 +78,7 @@ TR: Dict[str, Dict[str, str]] = {
         # Onglet Disquette
         "btn_open": "Open…",
         "btn_new": "New",
+        "btn_newcpm": "New CP/M",
         "btn_save": "Save",
         "btn_saveas": "Save as…",
         "lbl_track_sect": "TRACK SECT",
@@ -109,6 +110,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_file": "File: {n} ({s}) · {k} sector(s) found",
         "st_sector_hover": "Track {t} · sector {s} · {st}",
         "st_new_disk": "New blank diskette.",
+        "st_new_cpm": "New CP/M 2.2 system diskette (bootable, Amsdos utilities).",
         "st_opened": "Opened: {p}",
         "st_saved": "Saved: {p}",
         "st_savedas": "Saved as: {p}",
@@ -163,6 +165,7 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_filer": "Filer",
         "layer_both": "Both",
         "layer_amsdos": "AMSDOS",
+        "layer_cpm": "CP/M",
         "err_addr": "Invalid address",
         "err_addr_msg": "Invalid load address (e.g. 0x4000).",
         # Onglet Gotek
@@ -256,6 +259,7 @@ TR: Dict[str, Dict[str, str]] = {
         # Onglet Disquette
         "btn_open": "Ouvrir…",
         "btn_new": "Nouveau",
+        "btn_newcpm": "Nouveau CP/M",
         "btn_save": "Sauver",
         "btn_saveas": "Enreg. sous…",
         "lbl_track_sect": "PISTE SECT",
@@ -287,6 +291,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_file": "Fichier : {n} ({s}) · {k} secteur(s) repéré(s)",
         "st_sector_hover": "Piste {t} · secteur {s} · {st}",
         "st_new_disk": "Nouvelle disquette vierge.",
+        "st_new_cpm": "Nouvelle disquette système CP/M 2.2 (amorçable, utilitaires Amsdos).",
         "st_opened": "Ouvert : {p}",
         "st_saved": "Sauvegardé : {p}",
         "st_savedas": "Enregistré sous : {p}",
@@ -341,6 +346,7 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_filer": "Filer",
         "layer_both": "Les deux",
         "layer_amsdos": "AMSDOS",
+        "layer_cpm": "CP/M",
         "err_addr": "Adresse invalide",
         "err_addr_msg": "Adresse de chargement invalide (ex: 0x4000).",
         # Onglet Gotek
@@ -436,6 +442,7 @@ TR: Dict[str, Dict[str, str]] = {
         # Pestaña Disquete
         "btn_open": "Abrir…",
         "btn_new": "Nuevo",
+        "btn_newcpm": "Nuevo CP/M",
         "btn_save": "Guardar",
         "btn_saveas": "Guardar como…",
         "lbl_track_sect": "PISTA SECT",
@@ -467,6 +474,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_file": "Archivo: {n} ({s}) · {k} sector(es) localizado(s)",
         "st_sector_hover": "Pista {t} · sector {s} · {st}",
         "st_new_disk": "Nueva disquete en blanco.",
+        "st_new_cpm": "Nueva disquete de sistema CP/M 2.2 (arrancable, utilidades Amsdos).",
         "st_opened": "Abierto: {p}",
         "st_saved": "Guardado: {p}",
         "st_savedas": "Guardado como: {p}",
@@ -521,6 +529,7 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_filer": "Filer",
         "layer_both": "Ambas",
         "layer_amsdos": "AMSDOS",
+        "layer_cpm": "CP/M",
         "err_addr": "Dirección inválida",
         "err_addr_msg": "Dirección de carga inválida (ej: 0x4000).",
         # Pestaña Gotek

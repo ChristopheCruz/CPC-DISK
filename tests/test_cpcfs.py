@@ -149,3 +149,50 @@ def test_real_greed_amsdos_physical_read():
         data = fs.read_file(name, source="amsdos")
         assert len(data) == length
         assert b"Track-Info\r\n" not in data, name
+
+
+_DISKS = os.path.join(os.path.dirname(__file__), "..", "test_disks")
+
+
+def _disk(name: str) -> str:
+    return os.path.join(_DISKS, name)
+
+
+@pytest.mark.skipif(not os.path.exists(_disk("sooty.dsk")),
+                    reason="sooty.dsk de référence absent")
+def test_real_sooty_amsdos_only():
+    """sooty.dsk : pas de répertoire Filer exploitable, 5 objets AMSDOS
+    (dont des doublons de nom) sur une géométrie mixte 42 pistes."""
+    fs = CpcFilesystem(ADFDisk.load(_disk("sooty.dsk")))
+    files = fs.list_files()
+    assert len(files) == 5
+    assert all(f.source == "AMSDOS" for f in files)
+    lengths = {f.name: f.length for f in files}
+    assert lengths["DISK    BIN"] == 403
+    assert lengths["SCREEN  DL"] == 370
+    data = fs.read_file("DISK    BIN", source="amsdos")
+    assert len(data) == 403
+    assert any(b != 0xE5 for b in data)
+
+
+@pytest.mark.skipif(not os.path.exists(_disk("compilation190.dsk")),
+                    reason="compilation190.dsk de référence absent")
+def test_real_compilation190():
+    """compilation190.dsk (CPDRead) : 11 fichiers Filer + 17 objets AMSDOS
+    (deux jeux : Arkano, Cyber) — les deux couches coexistent."""
+    fs = CpcFilesystem(ADFDisk.load(_disk("compilation190.dsk")))
+    filer = fs.list_files(source="filer")
+    amsdos = fs.list_files(source="amsdos")
+    assert len(filer) == 11
+    assert len(amsdos) == 17
+    # Fichier Filer > 16 Ko (2 chunks).
+    data = fs.read_file("ARKANO  BIN", source="filer")
+    assert len(data) == 35712
+    assert any(b != 0xE5 for b in data)
+    # Fichier AMSDOS BASIC (longueur exacte, premier octet = longueur).
+    basic = fs.read_file("GRUGEUR BAS", source="amsdos")
+    assert len(basic) == 1743
+    # « A BAS » existe dans les deux couches : lecture par défaut = AMSDOS
+    # (métadonnées complètes), 186 o contre 384 o en région Filer.
+    assert len(fs.read_file("A BAS")) == 186
+    assert len(fs.read_file("A BAS", source="filer")) == 384

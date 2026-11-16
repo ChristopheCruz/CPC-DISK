@@ -38,6 +38,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import CpcError, CpcFile, CpcFilesystem, FT_BASIC, FT_BINARY
+from cpc_dsk.core.cpm import CpmFilesystem, is_cpm_disk, new_cpm_system_disk
 from cpc_dsk.core.gotek import (
     DEFAULT_NAME_PATTERN,
     FatFile,
@@ -490,9 +491,11 @@ def _center(win: tk.Toplevel, root: tk.Misc) -> None:
 class AddFileDialog:
     """Fenêtre modale : nom 8.3, type, adresse de chargement, couche."""
 
-    def __init__(self, app: "DskEditorApp", default_name: str):
+    def __init__(self, app: "DskEditorApp", default_name: str,
+                 cpm: bool = False):
         t = app.t
         self.app = app
+        self.cpm = cpm
         self.result: Optional[dict] = None
         self.win = win = tk.Toplevel(app.root)
         win.title(L("dlg_addwin_title"))
@@ -511,7 +514,8 @@ class AddFileDialog:
         self.load = tk.StringVar(value="0x4000")
         # Filer d'abord (DOS d'origine, lu par le Gotek sur matériel réel) ;
         # « both » pour un disque lisible aussi par les émulateurs AMSDOS.
-        self.fs = tk.StringVar(value="filer")
+        # Disque CP/M : répertoire CP/M (lu par le vrai BDOS) ou objet AMSDOS.
+        self.fs = tk.StringVar(value="cpm" if cpm else "filer")
 
         def label(text, row):
             tk.Label(frm, text=text, bg=t.panel, fg=t.acc, font=app.f_body,
@@ -530,10 +534,14 @@ class AddFileDialog:
         app.entry(frm, self.load, width=10).grid(row=2, column=1, sticky="w",
                                                  pady=6)
         label(L("add_layer"), 3)
-        Segmented(frm, app, self.fs,
-                  [("filer", L("layer_filer")),
-                   ("both", L("layer_both")),
-                   ("amsdos", L("layer_amsdos"))]).grid(
+        if cpm:
+            layers = [("cpm", L("layer_cpm")),
+                      ("amsdos", L("layer_amsdos"))]
+        else:
+            layers = [("filer", L("layer_filer")),
+                      ("both", L("layer_both")),
+                      ("amsdos", L("layer_amsdos"))]
+        Segmented(frm, app, self.fs, layers).grid(
             row=3, column=1, sticky="w", pady=6)
 
         btns = tk.Frame(frm, bg=t.panel)
@@ -868,6 +876,7 @@ class DskEditorApp:
         bar.pack(side="top", fill="x")
         for text, icon, cmd in ((L("btn_open"), "open", self.open_disk),
                                 (L("btn_new"), "new", self.new_disk),
+                                (L("btn_newcpm"), "new", self.new_cpm_disk),
                                 (L("btn_save"), "save", self.save_disk),
                                 (L("btn_saveas"), None, self.save_disk_as)):
             PixelButton(bar, self, text, command=cmd, icon=icon).pack(
@@ -1121,11 +1130,16 @@ class DskEditorApp:
         else:
             self.status.config(text=self._status_text)
 
+    def _fs(self):
+        """Système de fichiers du disque courant (CP/M auto-détecté)."""
+        return (CpmFilesystem(self.disk) if is_cpm_disk(self.disk)
+                else CpcFilesystem(self.disk))
+
     def _refresh_files(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self._files = []
         if self.disk is not None:
-            fs = CpcFilesystem(self.disk)
+            fs = self._fs()
             for f in fs.list_files():
                 self._files.append(f)
                 self.tree.insert(
@@ -1198,6 +1212,18 @@ class DskEditorApp:
         self._clear_hex()
         self._refresh()
         self._set_status(L("st_new_disk"))
+
+    def new_cpm_disk(self) -> None:
+        if self.disk is not None and not self.ask(
+                L("dlg_new_title"), L("dlg_new_msg")):
+            return
+        self.disk = new_cpm_system_disk()
+        self.path = None
+        self._cursor = None
+        self._last_hex = None
+        self._clear_hex()
+        self._refresh()
+        self._set_status(L("st_new_cpm"))
 
     def _save_to(self, path: str) -> bool:
         try:
@@ -1275,7 +1301,7 @@ class DskEditorApp:
         if f is None or self.disk is None:
             return
         try:
-            data = CpcFilesystem(self.disk).read_file(f.name, source=f.source)
+            data = self._fs().read_file(f.name, source=f.source)
         except (CpcError, ADFError) as exc:
             self._show_hex(b"", f"erreur : {exc}")
             return
@@ -1321,14 +1347,15 @@ class DskEditorApp:
         self._do_add_file(local)
 
     def _do_add_file(self, local: str) -> None:
-        dlg = AddFileDialog(self, _suggest_83(local))
+        dlg = AddFileDialog(self, _suggest_83(local),
+                            cpm=is_cpm_disk(self.disk))
         self.root.wait_window(dlg.win)
         if dlg.result is None:
             return
         try:
             with open(local, "rb") as fh:
                 data = fh.read()
-            CpcFilesystem(self.disk).write_file(
+            self._fs().write_file(
                 dlg.result["name"], data,
                 file_type=dlg.result["file_type"],
                 load_addr=dlg.result["load_addr"],
@@ -1366,7 +1393,7 @@ class DskEditorApp:
         if not out:
             return
         try:
-            data = CpcFilesystem(self.disk).read_file(f.name, source=f.source)
+            data = self._fs().read_file(f.name, source=f.source)
             with open(out, "wb") as fh:
                 fh.write(data)
         except (CpcError, ADFError, OSError) as exc:
@@ -1387,7 +1414,7 @@ class DskEditorApp:
                 danger=True):
             return
         try:
-            CpcFilesystem(self.disk).delete_file(f.name)
+            self._fs().delete_file(f.name)
         except (CpcError, ADFError) as exc:
             self.error(L("err_delete"), str(exc))
             return

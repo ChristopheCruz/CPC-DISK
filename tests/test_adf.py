@@ -4,7 +4,12 @@ import os
 
 import pytest
 
-from cpc_dsk.core.adf import ADFDisk, ADFError, DISK_INFO_SIZE
+from cpc_dsk.core.adf import (
+    ADFDisk,
+    ADFError,
+    DISK_INFO_SIZE,
+    TRACK_INFO_NUM_SECTORS_OFFSET,
+)
 
 
 def test_new_blank_geometry():
@@ -147,3 +152,25 @@ def test_real_abbey_dsk_sam_variant():
     assert d.track_sizes[1] == 4096   # autres : 15 × 256 o
     assert d.num_sectors(0) == 9
     assert d.num_sectors(1) == 15
+
+
+SOOTY = os.path.join(os.path.dirname(__file__), "..", "test_disks",
+                     "sooty.dsk")
+
+
+@pytest.mark.skipif(not os.path.exists(SOOTY),
+                    reason="sooty.dsk de référence absent")
+def test_real_sooty_mixed_geometry():
+    """sooty.dsk (CPCDiskXP) : 40 pistes 9×512 + 2 pistes Track-Info seules
+    (table = 0x01, 256 o, 0 secteur) — géométrie mixte tolérée."""
+    d = ADFDisk.load(SOOTY)
+    assert d.num_tracks == 42
+    assert d.track_sizes[:40] == [4864] * 40
+    assert d.track_sizes[40:] == [256, 256]
+    assert d.num_sectors(0) == 9
+    assert d.num_sectors(41) == 0
+    assert d.get_track_data(41) == b""
+    assert d.file_size == os.path.getsize(SOOTY)
+    # Piste 41 : Track-Info seul (0x15 = 0 secteur).
+    ti = bytes(d._raw[d.track_offsets[41]:d.track_offsets[41] + 256])
+    assert ti[TRACK_INFO_NUM_SECTORS_OFFSET] == 0

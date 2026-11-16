@@ -22,6 +22,9 @@ cpc-dsk = "cpc_dsk.cli:main"
 [tool.setuptools.packages.find]
 include = ["cpc_dsk*"]
 
+[tool.setuptools.package-data]
+cpc_dsk = ["fonts/*", "data/*.bin", "icon.ico", "icon.png"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"

@@ -1,15 +1,22 @@
 """Interface en ligne de commande de cpc_dsk.
 
 Commandes :
-    cpc-dsk new   <sortie.dsk> [--tracks N] [--sides N] [--sectors N] [--sector-size N]
+    cpc-dsk new   <sortie.dsk> [--tracks N] [--sides N] [--sectors N]
+                          [--sector-size N] | [--cpm] [--no-utils]
     cpc-dsk info  <disk.dsk>
-    cpc-dsk list  <disk.dsk> [--source filer|amsdos]
-    cpc-dsk read  <disk.dsk> <nom> --out <local> [--source filer|amsdos]
+    cpc-dsk list  <disk.dsk> [--source cpm|filer|amsdos]
+    cpc-dsk read  <disk.dsk> <nom> --out <local> [--source cpm|filer|amsdos]
     cpc-dsk write <disk.dsk> <nom> <local> [--fs both|filer|amsdos]
                           [--type basic|binary] [--load 0xADDR]
     cpc-dsk delete <disk.dsk> <nom>
     cpc-dsk hex   <disk.dsk> <piste> <secteur>
     cpc-dsk sector <disk.dsk> <piste> <secteur> [--write-file LOCAL]
+
+Les disques CP/M 2.2 (« System format ») sont détectés automatiquement
+(géométrie 40×1×9×512, IDs de secteur &41..&49, secteurs boot et
+configuration) : list/read/write/delete opèrent alors sur le répertoire
+CP/M (piste 2) et les objets AMSDOS. ``--source cpm`` désigne cette
+couche ; sur un disque Filer classique il est traité comme ``filer``.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from cpc_dsk.core.cpcfs import (
     FT_BASIC,
     FT_BINARY,
 )
+from cpc_dsk.core.cpm import CpmFilesystem, is_cpm_disk, new_cpm_system_disk
 
 
 # --------------------------------------------------------------------------- #
@@ -48,8 +56,21 @@ def _load(path: str) -> ADFDisk:
         raise SystemExit(1)
 
 
-def _fs(disk: ADFDisk) -> CpcFilesystem:
+def _fs(disk: ADFDisk):
+    """Système de fichiers adapté au disque (CP/M auto-détecté, sinon
+    Filer + AMSDOS classique)."""
+    if is_cpm_disk(disk):
+        return CpmFilesystem(disk)
     return CpcFilesystem(disk)
+
+
+def _source_for(fs, source):
+    """Source CLI (cpm|filer|amsdos) vers source du système de fichiers."""
+    if source == "cpm":
+        return "cpm" if isinstance(fs, CpmFilesystem) else "filer"
+    if source == "filer":
+        return "cpm" if isinstance(fs, CpmFilesystem) else "filer"
+    return source
 
 
 def _format_file(f) -> str:
@@ -61,26 +82,41 @@ def _format_file(f) -> str:
 # Sous-commandes
 # --------------------------------------------------------------------------- #
 def cmd_new(args) -> None:
-    disk = ADFDisk.new_blank(
-        tracks=args.tracks, sides=args.sides,
-        sectors=args.sectors, sector_size=args.sector_size)
+    if args.cpm:
+        disk = new_cpm_system_disk(with_utils=not args.no_utils)
+        kind = "Disquette système CP/M 2.2"
+    else:
+        disk = ADFDisk.new_blank(
+            tracks=args.tracks, sides=args.sides,
+            sectors=args.sectors, sector_size=args.sector_size)
+        kind = "Disquette"
     disk.save(args.output)
-    print(f"Disquette créée: {args.output}")
+    print(f"{kind} créée: {args.output}")
     print(f"  {disk.summary()}")
+    if args.cpm:
+        fs = CpmFilesystem(disk)
+        if fs.list_files():
+            print("  Fichiers: " + ", ".join(f.name for f in fs.list_files()))
+        else:
+            print("  (répertoire vide — système bootable sans utilitaires)")
 
 
 def cmd_info(args) -> None:
     disk = _load(args.disk)
+    fs = _fs(disk)
     print(f"Fichier : {args.disk}")
     print(f"  {disk.summary()}")
+    if isinstance(fs, CpmFilesystem):
+        print("  Type de disque : CP/M 2.2 (System format)")
     print(f"Fichiers:")
-    for f in _fs(disk).list_files():
+    for f in fs.list_files():
         print(f"  {_format_file(f)}")
 
 
 def cmd_list(args) -> None:
     disk = _load(args.disk)
-    files = _fs(disk).list_files(source=args.source)
+    fs = _fs(disk)
+    files = fs.list_files(source=_source_for(fs, args.source))
     if not files:
         print("(aucun fichier détecté)")
         return
@@ -90,7 +126,8 @@ def cmd_list(args) -> None:
 
 def cmd_read(args) -> None:
     disk = _load(args.disk)
-    data = _fs(disk).read_file(args.name, source=args.source)
+    fs = _fs(disk)
+    data = fs.read_file(args.name, source=_source_for(fs, args.source))
     with open(args.out, "wb") as fh:
         fh.write(data)
     print(f"Fichier {args.name!r} ({len(data)} o) extrait vers {args.out}.")
@@ -101,10 +138,17 @@ def cmd_write(args) -> None:
     with open(args.local, "rb") as fh:
         data = fh.read()
     ftype = FT_BASIC if args.type == "basic" else FT_BINARY
-    f = _fs(disk).write_file(
+    fs = _fs(disk)
+    if isinstance(fs, CpmFilesystem):
+        # Disque CP/M : « filer »/« both » = répertoire CP/M, « amsdos » =
+        # objet AMSDOS seul (aucun équivalent « both » distinct du CP/M).
+        mode = "amsdos" if args.fs == "amsdos" else "cpm"
+    else:
+        mode = args.fs
+    f = fs.write_file(
         args.name, data, file_type=ftype,
         load_addr=args.load, exec_addr=args.load,
-        mode=args.fs)
+        mode=mode)
     disk.save(args.disk)
     print(f"Fichier {f.name!r} ({f.length} o, {f.source}) "
           f"écrit sur {args.disk} @0x{f.offset:06X}.")
@@ -148,8 +192,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Éditeur de disquettes virtuelles .dsk (CPC) & Gotek.")
     sub = p.add_subparsers(dest="command", required=True)
 
-    n = sub.add_parser("new", help="Créer une disquette vierge.")
+    n = sub.add_parser("new", help="Créer une disquette vierge ou système CP/M.")
     n.add_argument("output")
+    g = n.add_mutually_exclusive_group()
+    g.add_argument("--cpm", action="store_true",
+                   help="Disque système CP/M 2.2 amorphe (bootable, "
+                        "utilitaires AMSDOS inclus).")
+    g.add_argument("--no-utils", action="store_true",
+                   help="Avec --cpm : sans les utilitaires (répertoire "
+                        "vide, système seulement).")
     n.add_argument("--tracks", type=int, default=geometry.DEFAULT_TRACKS)
     n.add_argument("--sides", type=int, default=geometry.DEFAULT_SIDES)
     n.add_argument("--sectors", type=int, default=geometry.DEFAULT_SECTORS)
@@ -160,19 +211,20 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("disk")
     i.set_defaults(func=cmd_info)
 
-    l = sub.add_parser("list", help="Lister les fichiers (Filer + AMSDOS).")
+    l = sub.add_parser("list", help="Lister les fichiers (CP/M ou Filer + AMSDOS).")
     l.add_argument("disk")
-    l.add_argument("--source", choices=["filer", "amsdos"],
-                   help="N'afficher qu'une seule couche.")
+    l.add_argument("--source", choices=["cpm", "filer", "amsdos"],
+                   help="N'afficher qu'une seule couche (cpm = répertoire "
+                        "CP/M ; sur disque Filer, cpm ≡ filer).")
     l.set_defaults(func=cmd_list)
 
     r = sub.add_parser("read", help="Extraire un fichier vers un fichier local.")
     r.add_argument("disk")
     r.add_argument("name", help="Nom du fichier sur la disquette.")
     r.add_argument("--out", required=True, help="Fichier de sortie local.")
-    r.add_argument("--source", choices=["filer", "amsdos"],
-                   help="Couche à lire (par défaut: AMSDOS si présent, "
-                        "sinon Filer).")
+    r.add_argument("--source", choices=["cpm", "filer", "amsdos"],
+                   help="Couche à lire (par défaut : répertoire CP/M ou "
+                        "Filer, puis objets AMSDOS).")
     r.set_defaults(func=cmd_read)
 
     w = sub.add_parser("write", help="Copier un fichier local sur la disquette.")

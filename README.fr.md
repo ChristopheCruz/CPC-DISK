@@ -56,6 +56,12 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - **Dump hexadécimal** d'un fichier ou d'un secteur, sur trois colonnes alignées : offset, octets, ASCII.
 - **Carte des secteurs** cliquable : la géométrie est lue sur l'image, les secteurs libres (remplis de `E5` ou de `00`) sont distingués des secteurs occupés, et ceux du fichier sélectionné sont surlignés.
 
+### Support CP/M 2.2
+
+- **Disques système CP/M 2.2 amorçables** (« System format », 40 pistes × 9 × 512, IDs de secteur `&41..&49`) : le bouton **Nouveau CP/M** (ou `cpc-dsk new x.dsk --cpm`) en génère un à partir d'une image de référence extraite d'un cpm22.dsk réel — CP/M 2.2 + Amsdos 2.0 (`AMSDOS.COM`, `DISCKIT2.COM`, `LOGO2.COM`, `LOGO2.SUB`), prêt à tester sur un Gotek réel.
+- **Détection automatique** des disques CP/M : le catalogue, l'ajout/extraction/suppression opèrent sur le répertoire CP/M (piste 2, entrées au format Filer) et les objets AMSDOS, y compris les fichiers « legacy » des disques réels dont le contenu est un objet AMSDOS inséré dans l'allocation.
+- Spécificités des disques réels gérées : noms en jeu de caractères CP/M (Planetfall), ordre des IDs de secteur séquentiel ou entrelacé (Track-Infos identiques à WinAPE sur les disques générés).
+
 ### Onglet Gotek (clé USB)
 
 - **Liste de sources** `.dsk` / `.adf`, réordonnable avec ▲ ▼.
@@ -105,6 +111,20 @@ python -m cpc_dsk.gui
 3. **Ajouter**, **Extraire** ou **Supprimer** des fichiers. La disquette est sauvegardée après chaque modification.
 4. Pour inspecter un secteur précis, saisis `piste secteur` (par exemple `0 0`) puis **Afficher**, ou clique directement dans la carte des secteurs (vue **Secteurs**, F4).
 
+### Créer un disque système CP/M
+
+1. **Nouveau CP/M** (ou `cpc-dsk new cpm.dsk --cpm`) → un disque CP/M 2.2 « System format » amorçable, avec les utilitaires Amsdos. `--no-utils` produit un système nu (répertoire vide).
+2. **Ajoute** tes programmes (couche répertoire CP/M, ou objets AMSDOS seuls), puis **Sauve**.
+3. Copie l'image sur la clé du Gotek (onglet Gotek, `DISK001.adf`) et amorçes-la sur un vrai CPC : le BIOS `|CPM` charge le secteur de boot, le système démarre sur `A>` et lit le répertoire de la piste 2.
+4. Les disques CP/M existants (réels ou home-brew) sont détectés automatiquement : ouvre-en un, le catalogue liste ses fichiers CP/M, fichiers « legacy » compris (ex. `RITDEMO.BIN` sur cpm22.dsk).
+
+```bash
+cpc-dsk list cpm.dsk --source cpm       # répertoire CP/M
+cpc-dsk list cpm.dsk --source amsdos    # objets AMSDOS
+cpc-dsk read cpm.dsk PROG.COM --out prog.com
+cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
+```
+
 ### Préparer une clé pour le Gotek
 
 1. Dans l'onglet **Gotek** (F2), **Ajoute** les disquettes, puis mets-les dans l'ordre voulu avec ▲ ▼.
@@ -143,10 +163,13 @@ cpc_dsk/
 ├── gui.py            Interface graphique tkinter (habillage pixel art)
 ├── cli.py            Interface en ligne de commande
 ├── i18n.py           Chaînes d'interface (en / fr / es)
+├── data/
+│   └── cpm22_system.bin   Image de référence CP/M 2.2 + Amsdos 2.0 (46 880 o)
 ├── fonts/            Press Start 2P et VT323 (licence OFL)
 └── core/
     ├── adf.py        Lecture et écriture des images disquette
     ├── cpcfs.py      Systèmes de fichiers Filer et AMSDOS
+    ├── cpm.py        CP/M 2.2 (« System format ») : système de fichiers + générateur de disque
     └── gotek.py      Préparation de la clé USB et rédacteur FAT16
 ```
 
