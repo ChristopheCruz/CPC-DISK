@@ -973,7 +973,7 @@ class DskEditorApp:
         self._show_left_view()
 
         # --- colonne droite : hexadécimal ---
-        hexp = Panel(pane, self, "Contenu · hex", accent=t.ink)
+        hexp = Panel(pane, self, L("panel_hex"), accent=t.ink)
         self.hex_title = self._label(hexp.body, "# —", fg=t.hi, anchor="w",
                                      justify="left", padx=14, pady=8)
         self.hex_title.pack(fill="x")
@@ -1169,7 +1169,7 @@ class DskEditorApp:
             self.file_label.config(text=L("lbl_no_disk"))
         else:
             self.info.config(text=self.disk.summary())
-            shown = self.path or "(nouveau)"
+            shown = self.path or L("lbl_new")
             if len(shown) > 60:
                 shown = "…" + shown[-58:]
             self.file_label.config(text=f"A: {shown}")
@@ -1303,7 +1303,7 @@ class DskEditorApp:
         try:
             data = self._fs().read_file(f.name, source=f.source)
         except (CpcError, ADFError) as exc:
-            self._show_hex(b"", f"erreur : {exc}")
+            self._show_hex(b"", f"{L('err_read')} : {exc}")
             return
         self._show_hex(
             data,
@@ -1448,10 +1448,10 @@ class DskEditorApp:
         self.gtk_tree = ttk.Treeview(
             holder, columns=("num", "file", "size", "dest"), show="headings",
             selectmode="extended", style="Pixel.Treeview")
-        for col, text, w, anchor in (("num", "N°", 44, "w"),
-                                     ("file", "SOURCE", 230, "w"),
-                                     ("size", "TAILLE", 90, "e"),
-                                     ("dest", "→ CLÉ USB", 150, "w")):
+        for col, text, w, anchor in (("num", L("gcol_num"), 44, "w"),
+                                     ("file", L("gcol_src"), 230, "w"),
+                                     ("size", L("gcol_size"), 90, "e"),
+                                     ("dest", L("gcol_dest"), 150, "w")):
             self.gtk_tree.heading(col, text=text, anchor=anchor)
             self.gtk_tree.column(col, width=w, anchor=anchor,
                                  stretch=col in ("file", "dest"))
@@ -1471,31 +1471,29 @@ class DskEditorApp:
         for x, y, w, h, key in FLOPPY:
             cv.create_rectangle(x * 5, y * 5, (x + w) * 5, (y + h) * 5,
                                 fill=getattr(t, key), outline="")
-        self._label(self.gtk_empty, "AUCUNE DISQUETTE", font=self.f_head).pack()
-        self._label(self.gtk_empty,
-                    "Ajoutez des images .dsk ou .adf : elles seront\n"
-                    "numérotées dans l'ordre de la liste.",
+        self._label(self.gtk_empty, L("no_disk_map"), font=self.f_head).pack()
+        self._label(self.gtk_empty, L("g_empty_msg"),
                     fg=t.hi, justify="center").pack(pady=(14, 0))
 
         gs = self._gotek_src_buttons
-        PixelButton(gs, self, "Ajouter", kind="primary", icon="new", padx=12,
-                    command=self.gotek_add).pack(side="left")
+        PixelButton(gs, self, L("btn_add"), kind="primary", icon="new",
+                    padx=12, command=self.gotek_add).pack(side="left")
         PixelButton(gs, self, "", icon="up", padx=10,
                     command=lambda: self.gotek_move(-1)).pack(side="left",
                                                               padx=(8, 0))
         PixelButton(gs, self, "", icon="down", padx=10,
                     command=lambda: self.gotek_move(1)).pack(side="left",
                                                              padx=(6, 0))
-        PixelButton(gs, self, "Retirer", padx=12, command=self.gotek_remove).pack(
-            side="left", padx=8)
-        PixelButton(gs, self, "Vider", kind="danger", padx=12,
+        PixelButton(gs, self, L("btn_remove"), padx=12,
+                    command=self.gotek_remove).pack(side="left", padx=8)
+        PixelButton(gs, self, L("btn_clear"), kind="danger", padx=12,
                     command=self.gotek_clear).pack(side="left")
 
         # --- colonne droite ---
         right = tk.Frame(tab, bg=t.paper)
         right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
-        res = Panel(right, self, "Résultat", accent=t.ink)
+        res = Panel(right, self, L("panel_result"), accent=t.ink)
         res.pack(side="bottom", fill="both", expand=True, pady=(16, 0))
         self.gtk_bar = tk.Canvas(res.body, height=26, bg=t.panel,
                                  highlightthickness=0)
@@ -1514,7 +1512,7 @@ class DskEditorApp:
         self.gtk_result.config(state="disabled")
 
 
-        opts = Panel(right, self, "Options de nommage")
+        opts = Panel(right, self, L("panel_opts"))
         opts.pack(fill="x")
         g = tk.Frame(opts.body, bg=t.panel, padx=14, pady=8)
         g.pack(fill="x")
@@ -1523,13 +1521,13 @@ class DskEditorApp:
             self._label(g, text, fg=t.acc, anchor="w").grid(
                 row=row, column=0, sticky="w", pady=3, padx=(0, 14))
 
-        lab("Patron de noms", 0)
+        lab(L("opt_pattern"), 0)
         self.entry(g, self.gtk_pattern, width=18).grid(row=0, column=1,
                                                        sticky="w", pady=3)
-        lab("Sous-dossier", 1)
+        lab(L("opt_subdir"), 1)
         self.entry(g, self.gtk_subfolder, width=18).grid(row=1, column=1,
                                                          sticky="w", pady=3)
-        lab("Index de départ", 2)
+        lab(L("opt_index"), 2)
         irow = tk.Frame(g, bg=t.panel)
         irow.grid(row=2, column=1, sticky="w", pady=3)
         self.entry(irow, self.gtk_index, width=5).pack(side="left")
@@ -1539,38 +1537,38 @@ class DskEditorApp:
         PixelButton(irow, self, "", icon="up", padx=8,
                     command=lambda: self._gotek_step(1)).pack(side="left",
                                                               padx=(6, 0))
-        lab("Aperçu", 3)
+        lab(L("opt_preview"), 3)
         self.gtk_preview = self._label(g, "", fg=t.hi, anchor="w")
         self.gtk_preview.grid(row=3, column=1, sticky="w", pady=3)
 
-        out = Panel(right, self, "Sortie · clé USB")
+        out = Panel(right, self, L("panel_out"))
         out.pack(fill="x", pady=(16, 0))
         orow = tk.Frame(out.body, bg=t.panel, padx=14, pady=12)
         orow.pack(fill="x")
         self.entry(orow, self.gtk_outdir, width=30).pack(side="left", fill="x",
                                                          expand=True)
-        PixelButton(orow, self, "Choisir…", icon="open",
+        PixelButton(orow, self, L("btn_choose"), icon="open",
                     command=self.gotek_choose_outdir).pack(side="left",
                                                            padx=(10, 0))
         acts = tk.Frame(out.body, bg=t.panel, padx=14)
         acts.pack(fill="x", pady=(0, 14))
-        PixelButton(acts, self, "Générer USB", kind="primary", padx=12,
+        PixelButton(acts, self, L("btn_gen"), kind="primary", padx=12,
                     command=self.gotek_prepare).pack(side="left")
-        PixelButton(acts, self, "Vérifier", padx=12,
+        PixelButton(acts, self, L("btn_verify"), padx=12,
                     command=self.gotek_verify).pack(side="left", padx=8)
-        PixelButton(acts, self, "Image FAT", padx=12,
+        PixelButton(acts, self, L("btn_fatimg"), padx=12,
                     command=self.gotek_fat_image).pack(side="left")
 
         # Chargement d'une image existante (.img) : liste le contenu, puis
         # « → Sources » (disquettes vers la pile) ou « Extraire… » (dossier).
         acts2 = tk.Frame(out.body, bg=t.panel, padx=14)
         acts2.pack(fill="x", pady=(0, 14))
-        PixelButton(acts2, self, "Charger l'image…", icon="open", padx=10,
+        PixelButton(acts2, self, L("btn_loadimg"), icon="open", padx=10,
                     command=self.gotek_load_image).pack(side="left")
-        PixelButton(acts2, self, "→ Sources", icon="up", padx=10,
+        PixelButton(acts2, self, L("btn_tosrc"), icon="up", padx=10,
                     command=self.gotek_img_to_sources).pack(side="left",
                                                             padx=8)
-        PixelButton(acts2, self, "Extraire…", icon="extract", padx=10,
+        PixelButton(acts2, self, L("btn_extract2"), icon="extract", padx=10,
                     command=self.gotek_img_extract).pack(side="left")
 
         self._gotek_refresh_tree()
@@ -1624,8 +1622,8 @@ class DskEditorApp:
             self.gtk_tree.selection_set(keep)
         n = len(self._gotek_sources)
         self.gtk_src_panel.head.config(
-            text=f"SOURCES · {n} IMAGE{'S' if n > 1 else ''}" if n
-            else "SOURCES · .DSK / .ADF")
+            text=L("panel_sources_n", n=n, s="S" if n > 1 else "") if n
+            else L("panel_sources0"))
         if n:
             self.gtk_empty.place_forget()
         else:
@@ -1641,25 +1639,21 @@ class DskEditorApp:
                 start_index=int(self.gtk_index.get()),
             )
         except Exception as exc:  # noqa: BLE001 — limite d'entrée GUI
-            raise GotekError(f"Options invalides : {exc}") from exc
+            raise GotekError(L("err_gopts", e=exc)) from exc
 
     def _gotek_check(self) -> bool:
         if not self._gotek_sources:
-            self.info_box(
-                "Sources vides",
-                "Ajoutez au moins une disquette (.dsk/.adf) dans la liste.")
+            self.info_box(L("dlg_gsrc_title"), L("dlg_gsrc_msg"))
             return False
         if not self.gtk_outdir.get().strip():
-            self.info_box(
-                "Sortie manquante",
-                "Choisissez le répertoire de sortie (contenu de la clé USB).")
+            self.info_box(L("dlg_gout_title"), L("dlg_gout_msg"))
             return False
         return True
 
     def gotek_add(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="Disquettes à mettre sur la clé",
-            filetypes=[("CPC DSK", "*.dsk *.adf"), ("Tous", "*.*")])
+            title=L("dlg_gadd_title"),
+            filetypes=[(L("ft_dsk"), "*.dsk *.adf"), (L("ft_all"), "*.*")])
         if paths:
             self.gotek_add_paths(list(paths))
 
@@ -1668,7 +1662,7 @@ class DskEditorApp:
             if p not in self._gotek_sources:
                 self._gotek_sources.append(p)
         self._gotek_refresh_tree()
-        self._set_status(f"Gotek : {len(self._gotek_sources)} source(s).")
+        self._set_status(L("st_gsrc", n=len(self._gotek_sources)))
 
     def gotek_remove(self) -> None:
         idx = sorted((int(i) for i in self.gtk_tree.selection()), reverse=True)
@@ -1694,14 +1688,13 @@ class DskEditorApp:
 
     def gotek_clear(self) -> None:
         if self._gotek_sources and not self.ask(
-                "Vider", "Retirer toutes les sources de la liste ?",
-                danger=True):
+                L("dlg_gclear_title"), L("dlg_gclear_msg"), danger=True):
             return
         self._gotek_sources = []
         self._gotek_refresh_tree()
 
     def gotek_choose_outdir(self) -> None:
-        d = filedialog.askdirectory(title="Répertoire de sortie (contenu de la clé)")
+        d = filedialog.askdirectory(title=L("dlg_goutdir_title"))
         if d:
             self.gtk_outdir.set(d)
 
@@ -1729,7 +1722,7 @@ class DskEditorApp:
         tx.config(state="normal")
         tx.delete("1.0", "end")
         if not self._gtk_last:
-            tx.insert("end", "> En attente.\n", "muted")
+            tx.insert("end", "> " + L("res_wait") + "\n", "muted")
         for name, tag in self._gtk_last:
             if tag == "ERR":
                 tx.insert("end", f"! {name}\n", "err")
@@ -1750,53 +1743,50 @@ class DskEditorApp:
                 self.gtk_outdir.get().strip(), self._gotek_sources, config)
         except (GotekError, ADFError, OSError) as exc:
             self._gotek_result_show([str(exc)], tag="ERR", progress=0)
-            self.error("Échec de la génération", str(exc))
+            self.error(L("err_ggen"), str(exc))
             return
         self._gotek_result_show(created)
-        self._set_status(
-            f"Gotek : {len(created)} image(s) écrite(s) dans "
-            f"{self.gtk_outdir.get().strip()}")
+        self._set_status(L("st_ggen", n=len(created),
+                           d=self.gtk_outdir.get().strip()))
 
     def gotek_verify(self) -> None:
         out = self.gtk_outdir.get().strip()
         if not out:
-            self.info_box("Vérification", "Choisissez d'abord le répertoire.")
+            self.info_box(L("dlg_gver_title"), L("dlg_gver_msg"))
             return
         try:
             valid = verify_usb_directory(out)
         except (GotekError, ADFError, OSError) as exc:
             self._gotek_result_show([str(exc)], tag="ERR", progress=0)
-            self.error("Vérification", str(exc))
+            self.error(L("dlg_gver_title"), str(exc))
             return
-        self._gotek_result_show(valid, tag="VALIDE")
-        self._set_status(f"Gotek : {len(valid)} image(s) valide(s) dans {out}.")
+        self._gotek_result_show(valid, tag=L("tag_valid"))
+        self._set_status(L("st_gver", n=len(valid), d=out))
 
     def gotek_fat_image(self) -> None:
         # Le répertoire « Sortie » n'est PAS requis ici (il ne sert qu'au
         # générer/vérifier) : le dialogue de sauvegarde donne le .img.
         if not self._gotek_sources:
-            self.info_box(
-                "Sources vides",
-                "Ajoutez au moins une disquette (.dsk/.adf) dans la liste.")
+            self.info_box(L("dlg_gsrc_title"), L("dlg_gsrc_msg"))
             return
         out_img = filedialog.asksaveasfilename(
-            title="Image FAT de la clé (32 Mo, à graver sur la clé USB)",
+            title=L("dlg_fatimg_dlg"),
             defaultextension=".img",
-            filetypes=[("Image FAT", "*.img")])
+            filetypes=[(L("ft_img"), "*.img")])
         if not out_img:
             return
         try:
             config = self._gotek_config()
             create_fat_image(out_img, self._gotek_sources, config)
         except GotekError as exc:
-            self.info_box("Image FAT", str(exc))
+            self.info_box(L("dlg_fatimg_title"), str(exc))
             return
         except (OSError, ADFError) as exc:
             self._gotek_result_show([str(exc)], tag="ERR", progress=0)
-            self.error("Échec de l'image FAT", str(exc))
+            self.error(L("err_fatimg"), str(exc))
             return
-        self._gotek_result_show([out_img], tag="IMAGE FAT OK")
-        self._set_status(f"Gotek : image FAT créée : {out_img}")
+        self._gotek_result_show([out_img], tag=L("tag_fatok"))
+        self._set_status(L("st_fatimg", p=out_img))
 
     # ------------------------------------------------------------------ #
     # Chargement d'une image FAT16 existante (.img de clé Gotek)
@@ -1804,42 +1794,40 @@ class DskEditorApp:
     def gotek_load_image(self) -> None:
         """Charge une image ``.img`` et liste son contenu dans Résultat."""
         img = filedialog.askopenfilename(
-            title="Image FAT de clé Gotek à charger",
-            filetypes=[("Image FAT", "*.img *.bin *.raw"), ("Tous", "*.*")])
+            title=L("dlg_loadimg_dlg"),
+            filetypes=[(L("ft_img"), "*.img *.bin *.raw"),
+                       (L("ft_all"), "*.*")])
         if not img:
             return
         try:
             files = list_fat_image(img)
         except (GotekError, OSError) as exc:
             self._gotek_result_show([str(exc)], tag="ERR", progress=0)
-            self.error("Chargement de l'image", str(exc))
+            self.error(L("err_loadimg_title"), str(exc))
             return
         self._gotek_img = img
         self._gotek_img_files = files
         if not files:
-            self._gotek_result_show(["(aucun fichier à la racine)"],
-                                    tag="VIDE", progress=0)
-            self._set_status(f"Gotek : image chargée : {os.path.basename(img)} (vide)")
+            self._gotek_result_show([L("loadimg_empty")],
+                                    tag=L("tag_video"), progress=0)
+            self._set_status(L("st_loadimg_empty",
+                               n=os.path.basename(img)))
             return
         lines = [f"{f.name}  {_fmt_size(f.size)}" for f in files]
-        self._gotek_result_show(lines, tag="DANS L'IMAGE")
-        self._set_status(
-            f"Gotek : {len(files)} fichier(s) dans {os.path.basename(img)} — "
-            "« → Sources » ou « Extraire… »")
+        self._gotek_result_show(lines, tag=L("tag_inimg"))
+        self._set_status(L("st_loadimg", n=len(files),
+                           m=os.path.basename(img)))
 
     def gotek_img_to_sources(self) -> None:
         """Extrait les .dsk/.adf de l'image chargée dans un dossier temp et
         les ajoute à la pile des sources Gotek."""
         if not self._gotek_img_files:
-            self.info_box("Aucune image",
-                          "Chargez d'abord une image « .img » "
-                          "(bouton « Charger l'image… »).")
+            self.info_box(L("dlg_noinfo_title"), L("dlg_noinfo_msg"))
             return
         disks = [f for f in self._gotek_img_files
                  if f.name.lower().endswith((".adf", ".dsk"))]
         if not disks:
-            self.info_box("Pas de disquettes",
-                          "L'image ne contient aucun fichier .dsk/.adf.")
+            self.info_box(L("dlg_nodisk_title"), L("dlg_nodisk_msg"))
             return
         tmp = tempfile.mkdtemp(prefix="cpc-gotek-")
         added: List[str] = []
@@ -1849,22 +1837,18 @@ class DskEditorApp:
                 with open(p, "wb") as fh:
                     fh.write(f.data)
             except OSError as exc:
-                self.error("Écriture du dossier temp", str(exc))
+                self.error(L("err_tmp"), str(exc))
                 return
             added.append(p)
         self.gotek_add_paths(added)
-        self._set_status(
-            f"Gotek : {len(added)} disquette(s) ajoutée(s) aux sources "
-            f"(dossier temp : {tmp}).")
+        self._set_status(L("st_gsrc_added", n=len(added), d=tmp))
 
     def gotek_img_extract(self) -> None:
         """Extrait tous les fichiers de l'image chargée dans un dossier choisi."""
         if not self._gotek_img_files:
-            self.info_box("Aucune image",
-                          "Chargez d'abord une image « .img » "
-                          "(bouton « Charger l'image… »).")
+            self.info_box(L("dlg_noinfo_title"), L("dlg_noinfo_msg"))
             return
-        d = filedialog.askdirectory(title="Dossier de destination")
+        d = filedialog.askdirectory(title=L("dlg_extract_dlg"))
         if not d:
             return
         try:
@@ -1872,13 +1856,11 @@ class DskEditorApp:
                 with open(os.path.join(d, f.name), "wb") as fh:
                     fh.write(f.data)
         except OSError as exc:
-            self.error("Échec de l'extraction", str(exc))
+            self.error(L("err_extract"), str(exc))
             return
         self._gotek_result_show([f.name for f in self._gotek_img_files],
-                                tag="EXTRAIT")
-        self._set_status(
-            f"Gotek : {len(self._gotek_img_files)} fichier(s) extrait(s) "
-            f"dans {d}.")
+                                tag=L("tag_extracted"))
+        self._set_status(L("st_gextracted", n=len(self._gotek_img_files), d=d))
 
     # ================================================================== #
     # Glisser-déposer (explorateur Windows)
@@ -1907,7 +1889,7 @@ class DskEditorApp:
 
         for p in others:
             if self.disk is None:
-                self.info_box("Ajout", "Créez ou ouvrez d'abord une disquette.")
+                self.info_box(L("dlg_add_title"), L("msg_create_first"))
                 return
             self._do_add_file(p)
 
@@ -1928,10 +1910,11 @@ class DskEditorApp:
         PixelDialog(self, title, message, kind="error")
 
     def ask(self, title: str, message: str, danger: bool = False) -> bool:
-        yes = ("Oui, effacer", True, "danger") if danger else ("Oui", True, "primary")
+        yes = ((L("dlg_yes_danger"), True, "danger") if danger
+               else (L("dlg_yes"), True, "primary"))
         dlg = PixelDialog(self, title, message,
                           kind="danger" if danger else "ask",
-                          buttons=(("Non", False, "normal"), yes))
+                          buttons=((L("dlg_no"), False, "normal"), yes))
         return bool(dlg.result)
 
 

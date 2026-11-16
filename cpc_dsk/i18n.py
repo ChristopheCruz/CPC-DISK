@@ -75,6 +75,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Ready. (drag & drop inactive)",
         "lbl_no_disk": "A: (no disk)",
         "lbl_geometry": "Geometry: —",
+        "lbl_new": "(new)",
         # Onglet Disquette
         "btn_open": "Open…",
         "btn_new": "New",
@@ -143,6 +144,7 @@ TR: Dict[str, Dict[str, str]] = {
         "msg_select_file": "Select a file to extract.",
         "dlg_extract_title2": "Extract {n} ({s})",
         "err_extract": "Extraction failed",
+        "err_read": "Read error",
         "dlg_delete_title": "Delete",
         "msg_select_delete": "Select a file to delete.",
         "dlg_delete_q": "Delete?",
@@ -235,7 +237,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_gsrc_added": ("Gotek: {n} diskette(s) added to the sources "
                           "(temp folder: {d})."),
         "dlg_extract_dlg": "Destination folder",
-        "st_extracted": "Gotek: {n} file(s) extracted to {d}.",
+        "st_gextracted": "Gotek: {n} file(s) extracted to {d}.",
     },
     "fr": {
         # Unités
@@ -256,6 +258,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Prêt. (glisser-déposer non actif)",
         "lbl_no_disk": "A: (aucun disque)",
         "lbl_geometry": "Géométrie : —",
+        "lbl_new": "(nouveau)",
         # Onglet Disquette
         "btn_open": "Ouvrir…",
         "btn_new": "Nouveau",
@@ -324,6 +327,7 @@ TR: Dict[str, Dict[str, str]] = {
         "msg_select_file": "Sélectionnez un fichier à extraire.",
         "dlg_extract_title2": "Extraire {n} ({s})",
         "err_extract": "Échec de l'extraction",
+        "err_read": "Erreur de lecture",
         "dlg_delete_title": "Suppression",
         "msg_select_delete": "Sélectionnez un fichier à supprimer.",
         "dlg_delete_q": "Supprimer ?",
@@ -418,7 +422,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_gsrc_added": ("Gotek : {n} disquette(s) ajoutée(s) aux sources "
                           "(dossier temp : {d})."),
         "dlg_extract_dlg": "Dossier de destination",
-        "st_extracted": "Gotek : {n} fichier(s) extrait(s) dans {d}.",
+        "st_gextracted": "Gotek : {n} fichier(s) extrait(s) dans {d}.",
     },
     "es": {
         # Unidades
@@ -439,6 +443,7 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Listo. (arrastrar y soltar inactivo)",
         "lbl_no_disk": "A: (sin disquete)",
         "lbl_geometry": "Geometría: —",
+        "lbl_new": "(nuevo)",
         # Pestaña Disquete
         "btn_open": "Abrir…",
         "btn_new": "Nuevo",
@@ -507,6 +512,7 @@ TR: Dict[str, Dict[str, str]] = {
         "msg_select_file": "Selecciona un archivo para extraer.",
         "dlg_extract_title2": "Extraer {n} ({s})",
         "err_extract": "Fallo al extraer",
+        "err_read": "Error de lectura",
         "dlg_delete_title": "Eliminar",
         "msg_select_delete": "Selecciona un archivo para eliminar.",
         "dlg_delete_q": "¿Eliminar?",
@@ -535,7 +541,7 @@ TR: Dict[str, Dict[str, str]] = {
         # Pestaña Gotek
         "panel_sources": "Fuentes · .dsk / .adf",
         "panel_sources0": "FUENTES · .DSK / .ADF",
-        "panel_sources_n": "FUENTES · {n} IMAGEN{s}",
+        "panel_sources_n": "FUENTES · {n} DISQUETE{s}",
         "gcol_num": "N°",
         "gcol_src": "FUENTE",
         "gcol_size": "TAMAÑO",
@@ -601,6 +607,6 @@ TR: Dict[str, Dict[str, str]] = {
         "st_gsrc_added": ("Gotek: {n} disquete(s) añadida(s) a las "
                           "fuentes (carpeta temporal: {d})."),
         "dlg_extract_dlg": "Carpeta de destino",
-        "st_extracted": "Gotek: {n} archivo(s) extraído(s) en {d}.",
+        "st_gextracted": "Gotek: {n} archivo(s) extraído(s) en {d}.",
     },
 }
