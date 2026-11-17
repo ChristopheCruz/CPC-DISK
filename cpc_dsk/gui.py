@@ -38,7 +38,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import CpcError, CpcFile, CpcFilesystem, FT_BASIC, FT_BINARY
-from cpc_dsk.core.cpm import CpmFilesystem, is_cpm_disk, new_cpm_system_disk
+from cpc_dsk.core.amsdos import AmsdosFile, AmsdosFilesystem, detect_format
+from cpc_dsk.core.cpm import is_cpm_disk, new_cpm_system_disk
 from cpc_dsk.core.gotek import (
     DEFAULT_NAME_PATTERN,
     FatFile,
@@ -503,7 +504,7 @@ class AddFileDialog:
     """Fenêtre modale : nom 8.3, type, adresse de chargement, couche."""
 
     def __init__(self, app: "DskEditorApp", default_name: str,
-                 cpm: bool = False):
+                 cpm: bool = False, amsdos: bool = True):
         t = app.t
         self.app = app
         self.cpm = cpm
@@ -523,10 +524,12 @@ class AddFileDialog:
         self.name = tk.StringVar(value=default_name)
         self.ftype = tk.StringVar(value="binary")
         self.load = tk.StringVar(value="0x4000")
-        # Filer d'abord (DOS d'origine, lu par le Gotek sur matériel réel) ;
-        # « both » pour un disque lisible aussi par les émulateurs AMSDOS.
-        # Disque CP/M : répertoire CP/M (lu par le vrai BDOS) ou objet AMSDOS.
-        self.fs = tk.StringVar(value="cpm" if cpm else "filer")
+        # Disquette AMSDOS (DATA ou CP/M) : avec en-tête AMSDOS (binaire,
+        # BASIC : ce qu'écrit SAVE) ou données brutes (texte, programme
+        # CP/M). Format inconnu : anciennes couches Filer / AMSDOS.
+        self.amsdos = amsdos
+        self.fs = tk.StringVar(value=("raw" if cpm else "amsdos") if amsdos
+                               else "filer")
 
         def label(text, row):
             tk.Label(frm, text=text, bg=t.panel, fg=t.acc, font=app.f_body,
@@ -545,9 +548,9 @@ class AddFileDialog:
         app.entry(frm, self.load, width=10).grid(row=2, column=1, sticky="w",
                                                  pady=6)
         label(L("add_layer"), 3)
-        if cpm:
-            layers = [("cpm", L("layer_cpm")),
-                      ("amsdos", L("layer_amsdos"))]
+        if amsdos:
+            layers = [("amsdos", L("layer_header")),
+                      ("raw", L("layer_raw"))]
         else:
             layers = [("filer", L("layer_filer")),
                       ("both", L("layer_both")),
@@ -1226,8 +1229,9 @@ class DskEditorApp:
             self.status.config(text=self._status_text)
 
     def _fs(self):
-        """Système de fichiers du disque courant (CP/M auto-détecté)."""
-        return (CpmFilesystem(self.disk) if is_cpm_disk(self.disk)
+        """Système de fichiers du disque courant : le catalogue AMSDOS
+        (DATA ou CP/M) ; pour un format inconnu, l'ancien balayage."""
+        return (AmsdosFilesystem(self.disk) if detect_format(self.disk)
                 else CpcFilesystem(self.disk))
 
     def _refresh_files(self) -> None:
@@ -1410,7 +1414,10 @@ class DskEditorApp:
             data,
             f"{f.name}  [{f.source} {f.type_name} {f.length} {L('sz_b')}]  "
             f"load=&{f.load_addr:04X}  @&{f.offset:05X}")
-        self._file_secs = self._find_file_sectors(data)
+        if isinstance(f, AmsdosFile):
+            self._file_secs = self._fs().file_sectors(f)
+        else:
+            self._file_secs = self._find_file_sectors(data)
         self._draw_map()
         self._set_status(L("st_file", n=f.name, s=f.source,
                            k=len(self._file_secs)))
@@ -1449,7 +1456,8 @@ class DskEditorApp:
 
     def _do_add_file(self, local: str) -> None:
         dlg = AddFileDialog(self, _suggest_83(local),
-                            cpm=is_cpm_disk(self.disk))
+                            cpm=is_cpm_disk(self.disk),
+                            amsdos=detect_format(self.disk) is not None)
         self.root.wait_window(dlg.win)
         if dlg.result is None:
             return
@@ -1480,8 +1488,10 @@ class DskEditorApp:
             return
         # Nom de fichier proposé avec l'extension CPC conservée :
         # « MONPROG BAS » -> « monprog.bas », sinon « nom.bin ».
-        name = f.name.strip()
-        if " " in name:
+        name = f.name.strip().split(":")[-1]
+        if "." in name:
+            name = name.lower()
+        elif " " in name:
             base, _, ext = name.rpartition(" ")
             if ext in ("BAS", "BIN", "COM", "DOC", "SYS", "LIB", "B", "HEX",
                        "MD", "TXT"):

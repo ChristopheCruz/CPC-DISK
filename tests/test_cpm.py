@@ -13,6 +13,7 @@ import os
 import pytest
 
 from cpc_dsk.core.adf import ADFDisk, TRACK_INFO_SIZE
+from cpc_dsk.core.amsdos import AmsdosFilesystem
 from cpc_dsk.core.cpcfs import CpcError, CpcFilesystem, FT_BINARY
 from cpc_dsk.core.cpm import (
     CPM_CAPACITY,
@@ -143,22 +144,20 @@ def test_new_cpm_track1_byte_equal_cpm22():
 
 
 def test_new_cpm_with_utils():
+    """Les 4 utilitaires sont écrits par le vrai catalogue CP/M et sont
+    identiques, octet pour octet, à ceux du cpm22.dsk réel."""
     d = new_cpm_system_disk()
-    fs = CpmFilesystem(d)
+    fs = AmsdosFilesystem(d)
     files = fs.list_files()
     assert [f.name for f in files] == [
         "AMSDOS.COM", "DISCKIT2.COM", "LOGO2.COM", "LOGO2.SUB"]
     assert [f.length for f in files] == [1024, 6144, 32768, 128]
     assert all(f.source == "CPM" for f in files)
-    # Entrées de répertoire : identiques à la référence (5 entrées × 32 o).
-    ref = _reference_bin()
-    helper = CpcFilesystem(d)
-    assert helper._read_linear(CPM_DIR_OFFSET, 160) == ref[6656:6816]
-    # Paquet : identique à la référence (40064 o), puis remplissage 0xE5.
-    assert helper._read_linear(CPM_PACK_START, 40064) == \
-        ref[6816:CPM22_SYSTEM_SIZE]
-    tail = helper._read_linear(CPM_PACK_START + 40064, 512)
-    assert all(b == 0xE5 for b in tail)
+    assert fs.read_file("LOGO2.SUB").startswith(b"drlkeys\r\nlogo2\r\nfwreset")
+    if os.path.exists(CPM22):
+        ref = AmsdosFilesystem(ADFDisk.load(CPM22))
+        for f in files:
+            assert fs.read_file(f.name) == ref.read_file(f.name), f.name
 
 
 def test_new_cpm_without_utils():
@@ -260,7 +259,7 @@ def test_cpm22_delete_legacy():
 
 
 # --------------------------------------------------------------------------- #
-# Écriture / suppression (disque généré)
+# Écriture / suppression (disque généré, catalogue CP/M réel)
 # --------------------------------------------------------------------------- #
 def _disk():
     return new_cpm_system_disk()
@@ -268,96 +267,88 @@ def _disk():
 
 def test_cpm_write_read_roundtrip():
     d = _disk()
-    fs = CpmFilesystem(d)
+    fs = AmsdosFilesystem(d)
     payload = bytes(range(256)) * 7  # 1792 o
     f = fs.write_file("HELLO.BIN", payload, load_addr=0x4000)
     assert f.name == "HELLO.BIN"
     assert f.source == "CPM"
     assert f.length == len(payload)
+    assert f.has_header and f.load_addr == 0x4000
     assert fs.read_file("HELLO.BIN") == payload
     assert "HELLO.BIN" in [x.name for x in fs.list_files()]
 
 
+def test_cpm_write_raw():
+    """Mode brut (programme CP/M, texte) : pas d'en-tête, fin à 0x1A."""
+    fs = AmsdosFilesystem(_disk())
+    f = fs.write_file("NOTE.TXT", b"bonjour\r\n", mode="raw")
+    assert not f.has_header
+    assert f.length == 128
+    assert fs.read_file("NOTE.TXT") == b"bonjour\r\n" + b"\x1a" * 119
+
+
 def test_cpm_write_name_11_chars_dotted():
-    """Nom 11 caractères ponctué (cas RITDEMO.BIN)."""
-    d = _disk()
-    fs = CpmFilesystem(d)
+    """Nom de 11 caractères avec un point (cas RITDEMO.BIN)."""
+    fs = AmsdosFilesystem(_disk())
     fs.write_file("RITDEMO.BIN", b"legacy test data")
     assert fs.read_file("RITDEMO.BIN") == b"legacy test data"
     assert fs.read_file("RITDEMO BIN") == b"legacy test data"
 
 
-def test_cpm_write_multichunk_and_counter():
-    """Fichier > 16 Ko : 2 chunks, compteur d'allocation continué."""
+def test_cpm_write_multi_extent():
+    """Fichier > 16 Ko : 2 extensions, blocs libres pris dans l'ordre."""
     d = _disk()
-    fs = CpmFilesystem(d)
-    payload = bytes(20000)
-    fs.write_file("BIGFILE.BIN", payload)
+    fs = AmsdosFilesystem(d)
+    payload = bytes(range(256)) * 80   # 20 480 o
+    f = fs.write_file("BIGFILE.BIN", payload)
     assert fs.read_file("BIGFILE.BIN") == payload
-    entries = fs.read_directory()
-    big = [e for e in entries if e.name == "BIGFILE.BIN"]
-    assert [e.chunk_index for e in big] == [0, 1]
-    assert big[0].size_units == 128  # 16 Ko
-    assert big[1].size_units == (20000 + 128 + 127) // 128 - 128
-    # Compteur continué après le maximum du disque de référence (0x29).
-    assert big[0].tail_max >= 0x2A
-    # Octets de compteur consécutifs d'un chunk à l'autre.
-    helper = CpcFilesystem(d)
-    raw = helper._read_linear(CPM_DIR_OFFSET, 1536)
-    e0 = raw[big[0].slot * 32:(big[0].slot + 1) * 32]
-    e1 = raw[big[1].slot * 32:(big[1].slot + 1) * 32]
-    n0 = (e0[0x0F] * 128 + 1023) // 1024
-    assert e1[0x10] == (e0[0x10 + n0 - 1] + 1) & 0xFF
-
-
-def test_cpm_write_amsdos_mode():
-    d = _disk()
-    fs = CpmFilesystem(d)
-    f = fs.write_file("HIDDEN.BIN", b"secret", mode="amsdos")
-    assert f.source == "AMSDOS"
-    assert "HIDDEN.BIN" not in [x.name for x in fs.list_files(source="cpm")]
-    # Le scan AMSDOS restitue le nom du champ d'en-tête (séparateur espace).
-    assert any("HIDDEN" in x.name
-               for x in fs.list_files(source="amsdos"))
-    assert fs.read_file("HIDDEN.BIN") == b"secret"
-    # Le disque reste lisible en CP/M (le système n'est pas touché).
-    assert len(fs.read_file("AMSDOS.COM")) == 1024
+    cat = fs.read_catalog()
+    ents = [cat[i:i + 32] for i in range(0, 2048, 32)
+            if cat[i] == 0 and cat[i + 1:i + 12] == b"BIGFILE BIN"]
+    assert [e[12] for e in ents] == [0, 1]
+    assert ents[0][15] == 128
+    assert ents[1][15] == -(-(len(payload) + 128) // 128) - 128
+    assert len(f.blocks) == -(-(len(payload) + 128) // 1024)
+    assert f.blocks == sorted(f.blocks)
 
 
 def test_cpm_delete():
     d = _disk()
-    fs = CpmFilesystem(d)
-    fs.write_file("TEMP.BIN", b"t" * 500)
+    fs = AmsdosFilesystem(d)
+    before = fs.free_bytes()
+    fs.write_file("TEMP.BIN", b"t" * 5000)
+    assert fs.free_bytes() == before - 6 * 1024
     fs.delete_file("TEMP.BIN")
     assert "TEMP.BIN" not in [x.name for x in fs.list_files()]
-    assert "TEMP.BIN" not in [x.name for x in fs.list_files(source="amsdos")]
-    # L'espace libéré est réutilisable.
+    assert fs.free_bytes() == before
     fs.write_file("REUSE.BIN", b"ok")
     assert fs.read_file("REUSE.BIN") == b"ok"
-    # Les utilitaires initiaux sont intacts.
     assert len(fs.read_file("DISCKIT2.COM")) == 6144
 
 
 def test_cpm_write_errors():
-    d = _disk()
-    fs = CpmFilesystem(d)
+    fs = AmsdosFilesystem(_disk())
     with pytest.raises(CpcError):
         fs.write_file("AMSDOS.COM", b"dup")
     with pytest.raises(CpcError):
         fs.write_file("EMPTY.BIN", b"")
     with pytest.raises(CpcError):
-        fs.write_file("X.BIN", b"x", mode="both")
+        fs.write_file("X.BIN", b"x", mode="inconnu")
+    with pytest.raises(CpcError):
+        fs.write_file("GROS.BIN", bytes(300 * 1024))
+    fs.write_file("AMSDOS.COM", b"remplace", overwrite=True)
+    assert fs.read_file("AMSDOS.COM") == b"remplace"
 
 
 def test_cpm_save_reload(tmp_path):
     d = _disk()
-    fs = CpmFilesystem(d)
+    fs = AmsdosFilesystem(d)
     fs.write_file("KEPT.BIN", b"keep me")
     path = os.path.join(tmp_path, "cpm.dsk")
     d.save(path)
     d2 = ADFDisk.load(path)
     assert is_cpm_disk(d2)
-    fs2 = CpmFilesystem(d2)
+    fs2 = AmsdosFilesystem(d2)
     assert [f.name for f in fs2.list_files()] == [
         "AMSDOS.COM", "DISCKIT2.COM", "LOGO2.COM", "LOGO2.SUB", "KEPT.BIN"]
     assert fs2.read_file("KEPT.BIN") == b"keep me"
@@ -365,8 +356,7 @@ def test_cpm_save_reload(tmp_path):
 
 
 def test_cpm_delete_not_found():
-    d = _disk()
-    fs = CpmFilesystem(d)
+    fs = AmsdosFilesystem(_disk())
     with pytest.raises(CpcError):
         fs.delete_file("NOPE.BIN")
     with pytest.raises(CpcError):

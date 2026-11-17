@@ -15,7 +15,8 @@ Gotek et le support CP/M 2.2, sans avoir à télécharger quoi que ce soit.
 | `planetfall_cpm.dsk` | réelle (Internet Archive, Infocom *Planetfall*) | Système CP/M + jeu : 5 fichiers, noms en **jeu de caractères CP/M** (0xC1..0xD6 = A..Z) | Détection CP/M (IDs séquentiels 41..49), noms traduits : `PLANET.COM`, `PLAN64/128/256.COM`, `PLANETFA.DAT` (7 chunks, 109 568 o). |
 | `starcross_cpm.dsk` | réelle (Internet Archive, Infocom *Starcross*) | Système CP/M + jeu : `STARCROS.COM` (8 192 o) + `STARCROS.DAT` (83 968 o) | Autre variante CP/M réelle (détection + lecture). |
 | `vierge.dsk` | créée par l'outil | rien | Créer/modifier une disquette vierge : ajouter un premier fichier (les 3 modes), sauvegarder, rouvrir. |
-| `demo_edition.dsk` | créée par l'outil | `BONJOUR BAS` (BASIC, 74 o, Filer+AMSDOS) et `DONNEES BIN` (20 224 o, binaire, 2 chunks Filer, Filer+AMSDOS) | Le test complet : extraire les 2 fichiers (comparer avec les originaux), supprimer `DONNEES BIN` (recolle du paquet), ajouter un fichier, sauvegarder, relister. |
+| `demo_edition.dsk` | créée par l'outil (catalogue AMSDOS) | `BONJOUR.BAS` (BASIC ASCII, sans en-tête), `DONNEES.BIN` (20 224 o, binaire avec en-tête, 2 extensions) et `README.MD` | Extraire, supprimer `DONNEES.BIN`, ajouter un fichier, sauvegarder, relister. |
+| `seq16.dsk` | produite par RASM (projet SEQ-16) | `SEQ16.BIN`, 9 banques `.SMP`, 13 banques `.INS` : 23 fichiers, au-delà des 16 entrées du premier secteur du catalogue | Le catalogue complet (64 entrées) ; ajouter un fichier sans abîmer les autres. |
 
 ## Scénario de test rapide (GUI)
 
@@ -52,3 +53,12 @@ cpc-dsk list  test_disks/planetfall_cpm.dsk          # PLANET.COM, PLANETFA.DAT�
 > d'époque. Travaillez sur des **copies** si vous voulez expérimenter la
 > sauvegarde (l'outil n'écrit que sur le fichier ouvert, mais il vaut
 > mieux préserver les originaux).
+
+## Catalogue AMSDOS
+
+Toutes ces disquettes, sauf `abbey.dsk`, utilisent le catalogue AMSDOS
+standard (64 entrées de 32 o dans les blocs 0 et 1, blocs de 1 Ko repérés
+par ID de secteur). C'est ce catalogue que lisent le CPC, CP/M et le
+Gotek, et c'est lui que l'outil lit et écrit (`cpc_dsk/core/amsdos.py`).
+Vérification : `LARA.DOC` de `robot.dsk` se lit sans coupure d'un secteur
+à l'autre (`tests/test_amsdos.py`).

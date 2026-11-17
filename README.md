@@ -51,8 +51,9 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 ### Diskette tab (`.dsk`)
 
 - **Open, create, and save** disk images in the EXTENDED CPC DSK format (`.adf` files are also accepted).
-- **File catalogue** across both layers, **Filer** and **AMSDOS**: name, type, length and load address.
-- **Add a local file** onto the diskette: 8.3 name, type (Basic or binary), load address, and choice of write layer (Filer, AMSDOS or both).
+- **AMSDOS catalogue**: the same one the CPC reads (64 entries, 1 KB blocks), for DATA (`&C1..&C9`) and SYSTEM/CP-M (`&41..&49`) diskettes. Name, type, length, load address; user numbers (`1:GAME.BAS`).
+- **Add a local file**: 8.3 name, type (Basic or binary), load address, **with an AMSDOS header** (like `SAVE`) or **as raw data** (text, CP/M program). Space is taken from free blocks, as AMSDOS does.
+- A diskette in an unknown format is read on a best-effort basis by the old header scan.
 - **Extract** a file to the local disk, keeping its extension (`MONPROG BAS` → `monprog.bas`).
 - **Delete** a file, with confirmation.
 - **Hex dump** of a file or a sector, in three aligned columns: offset, bytes, ASCII.
@@ -61,7 +62,7 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 ### CP/M 2.2 support
 
 - **Bootable CP/M 2.2 system disks** ("System format", 40 tracks × 9 × 512, sector IDs `&41..&49`): the **New CP/M** button (or `cpc-dsk new x.dsk --cpm`) builds one from a reference image extracted from a real cpm22.dsk — CP/M 2.2 + Amsdos 2.0 (`AMSDOS.COM`, `DISCKIT2.COM`, `LOGO2.COM`, `LOGO2.SUB`), ready to test on a real Gotek.
-- **Automatic detection** of CP/M disks: the catalogue, add/extract/delete all operate on the CP/M directory (track 2, Filer-format entries) and the AMSDOS objects, including the "legacy" files of real disks whose content is an AMSDOS object embedded in the allocation.
+- **Automatic detection** of CP/M disks: the catalogue is the CP/M 2.2 one (track 2, 64 entries, 1 KB blocks). Files with an AMSDOS header are recognised (e.g. `RITDEMO.BIN`, 11,264 bytes).
 - Real-disk quirks handled: CP/M character set names (Planetfall), sequential or interleaved sector ID orders (WinAPE-identical track headers on generated disks).
 
 ### Gotek tab (USB key)
@@ -137,7 +138,7 @@ python -m cpc_dsk.gui
 ### Building a CP/M system disk
 
 1. **New CP/M** (or `cpc-dsk new cpm.dsk --cpm`) → a bootable CP/M 2.2 "System format" disk with the Amsdos utilities. `--no-utils` produces a bare system (empty directory).
-2. **Add** your programs (CP/M directory layer, or AMSDOS-only objects), then **save**.
+2. **Add** your programs (raw data for a `.COM`, AMSDOS header for a CPC binary), then **save**.
 3. Copy the image to the Gotek's key (Gotek tab, `DISK001.adf`) and boot it on a real CPC: the BIOS `|CPM` loads the boot sector, the system comes up at `A>` and reads the track-2 directory.
 4. Existing CP/M disks (real or home-brew) are detected automatically: open one and the catalogue shows its CP/M files, "legacy" files included (e.g. `RITDEMO.BIN` on cpm22.dsk).
 
@@ -191,7 +192,8 @@ cpc_dsk/
 ├── fonts/            Press Start 2P and VT323 (OFL license)
 └── core/
     ├── adf.py        disk image reader / writer
-    ├── cpcfs.py      Filer and AMSDOS filesystems
+    ├── amsdos.py     AMSDOS / CP/M catalogue (DATA and SYSTEM formats): read, write, delete
+    ├── cpcfs.py      AMSDOS headers, fallback scan (unknown formats)
     ├── cpm.py        CP/M 2.2 ("System format") filesystem + disk builder
     └── gotek.py      USB key preparation and FAT16 writer
 ```

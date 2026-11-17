@@ -32,7 +32,8 @@ from cpc_dsk.core.cpcfs import (
     FT_BASIC,
     FT_BINARY,
 )
-from cpc_dsk.core.cpm import CpmFilesystem, is_cpm_disk, new_cpm_system_disk
+from cpc_dsk.core.amsdos import AmsdosFilesystem, detect_format
+from cpc_dsk.core.cpm import is_cpm_disk, new_cpm_system_disk
 
 
 # --------------------------------------------------------------------------- #
@@ -57,19 +58,23 @@ def _load(path: str) -> ADFDisk:
 
 
 def _fs(disk: ADFDisk):
-    """Système de fichiers adapté au disque (CP/M auto-détecté, sinon
-    Filer + AMSDOS classique)."""
-    if is_cpm_disk(disk):
-        return CpmFilesystem(disk)
+    """Système de fichiers adapté au disque.
+
+    Disquette au format AMSDOS (DATA ou SYSTEM/CP/M) : le vrai catalogue,
+    celui que lit le CPC. Sinon (format inconnu) : l'ancien balayage
+    « Filer + AMSDOS », en lecture de secours.
+    """
+    if detect_format(disk) is not None:
+        return AmsdosFilesystem(disk)
     return CpcFilesystem(disk)
 
 
 def _source_for(fs, source):
     """Source CLI (cpm|filer|amsdos) vers source du système de fichiers."""
+    if isinstance(fs, AmsdosFilesystem):
+        return None            # une seule couche : le catalogue
     if source == "cpm":
-        return "cpm" if isinstance(fs, CpmFilesystem) else "filer"
-    if source == "filer":
-        return "cpm" if isinstance(fs, CpmFilesystem) else "filer"
+        return "filer"
     return source
 
 
@@ -94,7 +99,7 @@ def cmd_new(args) -> None:
     print(f"{kind} créée: {args.output}")
     print(f"  {disk.summary()}")
     if args.cpm:
-        fs = CpmFilesystem(disk)
+        fs = AmsdosFilesystem(disk)
         if fs.list_files():
             print("  Fichiers: " + ", ".join(f.name for f in fs.list_files()))
         else:
@@ -106,8 +111,12 @@ def cmd_info(args) -> None:
     fs = _fs(disk)
     print(f"Fichier : {args.disk}")
     print(f"  {disk.summary()}")
-    if isinstance(fs, CpmFilesystem):
-        print("  Type de disque : CP/M 2.2 (System format)")
+    if isinstance(fs, AmsdosFilesystem):
+        kind = "CP/M 2.2 (SYSTEM)" if is_cpm_disk(disk) else f"AMSDOS {fs.fmt.name}"
+        print(f"  Format : {kind} — libre : {fs.free_bytes() // 1024} Ko, "
+              f"{fs.free_entries()} entrées de catalogue")
+    else:
+        print("  Format : inconnu (lecture de secours par balayage)")
     print(f"Fichiers:")
     for f in fs.list_files():
         print(f"  {_format_file(f)}")
@@ -139,16 +148,16 @@ def cmd_write(args) -> None:
         data = fh.read()
     ftype = FT_BASIC if args.type == "basic" else FT_BINARY
     fs = _fs(disk)
-    if isinstance(fs, CpmFilesystem):
-        # Disque CP/M : « filer »/« both » = répertoire CP/M, « amsdos » =
-        # objet AMSDOS seul (aucun équivalent « both » distinct du CP/M).
-        mode = "amsdos" if args.fs == "amsdos" else "cpm"
+    exec_addr = args.exec if args.exec is not None else args.load
+    if isinstance(fs, AmsdosFilesystem):
+        mode = "raw" if args.fs in ("raw", "filer") else "amsdos"
+        f = fs.write_file(args.name, data, file_type=ftype,
+                          load_addr=args.load, exec_addr=exec_addr,
+                          mode=mode, overwrite=args.force)
     else:
-        mode = args.fs
-    f = fs.write_file(
-        args.name, data, file_type=ftype,
-        load_addr=args.load, exec_addr=args.load,
-        mode=mode)
+        mode = "filer" if args.fs == "raw" else args.fs
+        f = fs.write_file(args.name, data, file_type=ftype,
+                          load_addr=args.load, exec_addr=exec_addr, mode=mode)
     disk.save(args.disk)
     print(f"Fichier {f.name!r} ({f.length} o, {f.source}) "
           f"écrit sur {args.disk} @0x{f.offset:06X}.")
@@ -211,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("disk")
     i.set_defaults(func=cmd_info)
 
-    l = sub.add_parser("list", help="Lister les fichiers (CP/M ou Filer + AMSDOS).")
+    l = sub.add_parser("list", help="Lister les fichiers du catalogue.")
     l.add_argument("disk")
     l.add_argument("--source", choices=["cpm", "filer", "amsdos"],
                    help="N'afficher qu'une seule couche (cpm = répertoire "
@@ -231,9 +240,14 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("disk")
     w.add_argument("name", help="Nom du fichier sur la disquette (8.3).")
     w.add_argument("local", help="Fichier local à copier.")
-    w.add_argument("--fs", choices=["both", "filer", "amsdos"], default="both",
-                   help="both (défaut) = répertoire Filer + objet AMSDOS ; "
-                        "filer = DOS/Gotek seul ; amsdos = émulateurs seuls.")
+    w.add_argument("--fs", choices=["amsdos", "raw", "both", "filer"], default="amsdos",
+                   help="amsdos (défaut) = avec en-tête AMSDOS (binaire, BASIC) ; "
+                        "raw = données brutes (texte ASCII, programme CP/M). "
+                        "both/filer : anciens noms de amsdos/raw.")
+    w.add_argument("--force", action="store_true",
+                   help="Remplacer le fichier s'il existe déjà.")
+    w.add_argument("--exec", type=lambda s: int(s, 0), default=None,
+                   help="Adresse d'exécution (par défaut : celle de chargement).")
     w.add_argument("--type", choices=["basic", "binary"], default="binary")
     w.add_argument("--load", type=lambda s: int(s, 0), default=0x4000,
                    help="Adresse de chargement (décimal ou 0xhex) — objet "

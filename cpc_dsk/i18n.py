@@ -172,6 +172,8 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_both": "Both",
         "layer_amsdos": "AMSDOS",
         "layer_cpm": "CP/M",
+        "layer_header": "AMSDOS header",
+        "layer_raw": "Raw data",
         "err_addr": "Invalid address",
         "err_addr_msg": "Invalid load address (e.g. 0x4000).",
         # Onglet Gotek
@@ -361,6 +363,8 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_both": "Les deux",
         "layer_amsdos": "AMSDOS",
         "layer_cpm": "CP/M",
+        "layer_header": "En-tête AMSDOS",
+        "layer_raw": "Données brutes",
         "err_addr": "Adresse invalide",
         "err_addr_msg": "Adresse de chargement invalide (ex: 0x4000).",
         # Onglet Gotek
@@ -552,6 +556,8 @@ TR: Dict[str, Dict[str, str]] = {
         "layer_both": "Ambas",
         "layer_amsdos": "AMSDOS",
         "layer_cpm": "CP/M",
+        "layer_header": "Cabecera AMSDOS",
+        "layer_raw": "Datos brutos",
         "err_addr": "Dirección inválida",
         "err_addr_msg": "Dirección de carga inválida (ej: 0x4000).",
         # Pestaña Gotek
