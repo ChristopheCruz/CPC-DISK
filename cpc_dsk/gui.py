@@ -1168,7 +1168,13 @@ class DskEditorApp:
             self.info.config(text=L("lbl_geometry"))
             self.file_label.config(text=L("lbl_no_disk"))
         else:
-            self.info.config(text=self.disk.summary())
+            self.info.config(text=L("sum_geometry",
+                                    fmt="Extended" if self.disk.extended
+                                    else "Standard",
+                                    tracks=self.disk.num_tracks,
+                                    sides=self.disk.num_sides,
+                                    n=self.disk.file_size,
+                                    sizes=sorted(set(self.disk.track_sizes))))
             shown = self.path or L("lbl_new")
             if len(shown) > 60:
                 shown = "…" + shown[-58:]

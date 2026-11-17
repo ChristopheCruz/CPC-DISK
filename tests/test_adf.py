@@ -174,3 +174,40 @@ def test_real_sooty_mixed_geometry():
     # Piste 41 : Track-Info seul (0x15 = 0 secteur).
     ti = bytes(d._raw[d.track_offsets[41]:d.track_offsets[41] + 256])
     assert ti[TRACK_INFO_NUM_SECTORS_OFFSET] == 0
+
+
+def test_sum_geometry_i18n():
+    """Barre d'info (sum_geometry) : localisée en en/fr/es, valeurs intactes.
+
+    Régression : la barre d'info affichait ``disk.summary()`` (français
+    durci) dans les trois langues ; la GUI passe par la clé i18n.
+    """
+    from cpc_dsk.i18n import LANGUAGES, get_language, set_language, t
+    prev = get_language()
+    try:
+        d = ADFDisk.new_blank()
+        for lang in LANGUAGES:
+            set_language(lang)
+            s = t("sum_geometry",
+                  fmt="Extended" if d.extended else "Standard",
+                  tracks=d.num_tracks, sides=d.num_sides,
+                  n=d.file_size, sizes=sorted(set(d.track_sizes)))
+            # Les valeurs géométriques sont présentes dans toutes les langues.
+            assert "Extended" in s
+            assert str(d.num_tracks) in s
+            assert str(d.file_size) in s
+        # Le français conserve la formulation technique d'origine.
+        set_language("fr")
+        fr = t("sum_geometry", fmt="Extended", tracks=40, sides=1,
+               n=194816, sizes=[4864])
+        assert fr == ("format=Extended pistes=40 faces=1 "
+                      "taille_fichier=194816 o tailles_pistes=[4864]")
+        # L'anglais n'est plus français (plus de « pistes »/« faces »).
+        set_language("en")
+        en = t("sum_geometry", fmt="Extended", tracks=40, sides=1,
+               n=194816, sizes=[4864])
+        assert "pistes" not in en and "faces" not in en
+        assert "tracks=40" in en and "sides=1" in en
+        assert "file_size=194816 B" in en
+    finally:
+        set_language(prev)

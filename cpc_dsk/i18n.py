@@ -75,6 +75,8 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Ready. (drag & drop inactive)",
         "lbl_no_disk": "A: (no disk)",
         "lbl_geometry": "Geometry: —",
+        "sum_geometry": ("format={fmt} tracks={tracks} sides={sides} "
+                         "file_size={n} B track_sizes={sizes}"),
         "lbl_new": "(new)",
         # Onglet Disquette
         "btn_open": "Open…",
@@ -258,6 +260,8 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Prêt. (glisser-déposer non actif)",
         "lbl_no_disk": "A: (aucun disque)",
         "lbl_geometry": "Géométrie : —",
+        "sum_geometry": ("format={fmt} pistes={tracks} faces={sides} "
+                         "taille_fichier={n} o tailles_pistes={sizes}"),
         "lbl_new": "(nouveau)",
         # Onglet Disquette
         "btn_open": "Ouvrir…",
@@ -443,6 +447,8 @@ TR: Dict[str, Dict[str, str]] = {
         "st_dnd_off": "Listo. (arrastrar y soltar inactivo)",
         "lbl_no_disk": "A: (sin disquete)",
         "lbl_geometry": "Geometría: —",
+        "sum_geometry": ("formato={fmt} pistas={tracks} caras={sides} "
+                         "tam_archivo={n} B tama_pistas={sizes}"),
         "lbl_new": "(nuevo)",
         # Pestaña Disquete
         "btn_open": "Abrir…",
