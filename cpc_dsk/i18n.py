@@ -242,6 +242,8 @@ TR: Dict[str, Dict[str, str]] = {
                           "(temp folder: {d})."),
         "dlg_extract_dlg": "Destination folder",
         "st_gextracted": "Gotek: {n} file(s) extracted to {d}.",
+        "img_tree_label": "Image: {n}",
+        "img_hint": "{n} file(s) — select one, then « Extract… »",
     },
     "fr": {
         # Unités
@@ -431,6 +433,8 @@ TR: Dict[str, Dict[str, str]] = {
                           "(dossier temp : {d})."),
         "dlg_extract_dlg": "Dossier de destination",
         "st_gextracted": "Gotek : {n} fichier(s) extrait(s) dans {d}.",
+        "img_tree_label": "Image : {n}",
+        "img_hint": "{n} fichier(s) — sélectionnez-en un puis « Extraire… »",
     },
     "es": {
         # Unidades
@@ -620,5 +624,7 @@ TR: Dict[str, Dict[str, str]] = {
                           "fuentes (carpeta temporal: {d})."),
         "dlg_extract_dlg": "Carpeta de destino",
         "st_gextracted": "Gotek: {n} archivo(s) extraído(s) en {d}.",
+        "img_tree_label": "Imagen: {n}",
+        "img_hint": "{n} archivo(s) — seleccionad uno y luego « Extraer… »",
     },
 }

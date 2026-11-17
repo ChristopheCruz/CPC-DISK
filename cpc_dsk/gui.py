@@ -1600,6 +1600,29 @@ class DskEditorApp:
                                  highlightthickness=0)
         self.gtk_bar.pack(fill="x", padx=14, pady=(12, 6))
         self.gtk_bar.bind("<Configure>", lambda e: self._draw_progress())
+        # --- contenu de l'image chargée (sélectionnable) ---
+        self.gtk_img_holder = tk.Frame(res.body, bg=t.panel)
+        self.gtk_img_label = self._label(self.gtk_img_holder, "", fg=t.acc,
+                                         anchor="w", font=self.f_head)
+        self.gtk_img_label.pack(fill="x", padx=14, pady=(0, 4))
+        img_inner = tk.Frame(self.gtk_img_holder, bg=t.panel)
+        img_inner.pack(fill="x", padx=14, pady=(0, 8))
+        self.gtk_img_tree = ttk.Treeview(
+            img_inner, columns=("name", "size"), show="headings",
+            selectmode="extended", height=6, style="Pixel.Treeview")
+        for col, text, w, anchor in (("name", L("gcol_src"), 240, "w"),
+                                     ("size", L("gcol_size"), 90, "e")):
+            self.gtk_img_tree.heading(col, text=text, anchor=anchor)
+            self.gtk_img_tree.column(col, width=w, anchor=anchor,
+                                     stretch=(col == "name"))
+        img_sb = ttk.Scrollbar(img_inner, orient="vertical",
+                               command=self.gtk_img_tree.yview,
+                               style="Pixel.Vertical.TScrollbar")
+        self.gtk_img_tree.configure(yscrollcommand=img_sb.set)
+        self.gtk_img_tree.pack(side="left", fill="both", expand=True)
+        img_sb.pack(side="right", fill="y")
+        # masqué tant qu'aucune image n'est chargée (affiché par
+        # gotek_load_image via _populate_img_tree).
         self.gtk_result = tk.Text(res.body, font=self.f_mono, wrap="none",
                                   bg=t.panel, fg=t.ink, relief="flat", bd=0,
                                   padx=14, pady=6, height=4, insertwidth=0,
@@ -1892,6 +1915,15 @@ class DskEditorApp:
     # ------------------------------------------------------------------ #
     # Chargement d'une image FAT16 existante (.img de clé Gotek)
     # ------------------------------------------------------------------ #
+    def _populate_img_tree(self, files: List[FatFile], name: str) -> None:
+        """Remplit la liste sélectionnable des fichiers de l'image."""
+        self.gtk_img_tree.delete(*self.gtk_img_tree.get_children())
+        for i, f in enumerate(files):
+            self.gtk_img_tree.insert("", "end", iid=str(i),
+                                     values=(f.name, _fmt_size(f.size)))
+        self.gtk_img_label.configure(text=L("img_tree_label", n=name))
+        self.gtk_img_holder.pack(fill="x", before=self.gtk_result)
+
     def gotek_load_image(self) -> None:
         """Charge une image ``.img`` et liste son contenu dans Résultat."""
         img = filedialog.askopenfilename(
@@ -1914,8 +1946,9 @@ class DskEditorApp:
             self._set_status(L("st_loadimg_empty",
                                n=os.path.basename(img)))
             return
-        lines = [f"{f.name}  {_fmt_size(f.size)}" for f in files]
-        self._gotek_result_show(lines, tag=L("tag_inimg"))
+        self._populate_img_tree(files, os.path.basename(img))
+        self._gotek_result_show([L("img_hint", n=len(files))],
+                                tag=L("tag_inimg"))
         self._set_status(L("st_loadimg", n=len(files),
                            m=os.path.basename(img)))
 
@@ -1945,23 +1978,29 @@ class DskEditorApp:
         self._set_status(L("st_gsrc_added", n=len(added), d=tmp))
 
     def gotek_img_extract(self) -> None:
-        """Extrait tous les fichiers de l'image chargée dans un dossier choisi."""
+        """Extrait vers un dossier choisi les fichiers de l'image chargée :
+        ceux sélectionnés dans la liste, ou tous si aucune sélection.
+        L'image n'est jamais modifiée (lecture seule)."""
         if not self._gotek_img_files:
             self.info_box(L("dlg_noinfo_title"), L("dlg_noinfo_msg"))
             return
+        sel = [int(iid) for iid in self.gtk_img_tree.selection()
+               if iid.isdigit() and int(iid) < len(self._gotek_img_files)]
+        files = ([self._gotek_img_files[i] for i in sorted(sel)]
+                 if sel else self._gotek_img_files)
         d = filedialog.askdirectory(title=L("dlg_extract_dlg"))
         if not d:
             return
         try:
-            for f in self._gotek_img_files:
+            for f in files:
                 with open(os.path.join(d, f.name), "wb") as fh:
                     fh.write(f.data)
         except OSError as exc:
             self.error(L("err_extract"), str(exc))
             return
-        self._gotek_result_show([f.name for f in self._gotek_img_files],
+        self._gotek_result_show([f.name for f in files],
                                 tag=L("tag_extracted"))
-        self._set_status(L("st_gextracted", n=len(self._gotek_img_files), d=d))
+        self._set_status(L("st_gextracted", n=len(files), d=d))
 
     # ================================================================== #
     # Glisser-déposer (explorateur Windows)
