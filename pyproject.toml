@@ -20,7 +20,8 @@ dev = ["pytest", "ruff"]
 cpc-dsk = "cpc_dsk.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["cpc_dsk*"]
+# cpc_dsk, cpc_dsk.core et cpc_dsk.seq16 (onglet Samples SEQ-16)
+include = ["cpc_dsk", "cpc_dsk.*"]
 
 [tool.setuptools.package-data]
 cpc_dsk = ["fonts/*", "data/*.bin", "icon.ico", "icon.png"]

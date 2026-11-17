@@ -74,6 +74,16 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 - **Create a full FAT16 image** of the key (32 MB) with a built-in FAT writer, no external tool needed.
 - **Load an existing `.img` image**: list its content, send its diskettes back to the source stack, or extract everything to a folder.
 
+### Samples SEQ-16 tab
+
+A sample-bank editor for the SEQ-16 tracker on the CPC, built in as a third tab (also runs on its own: `python -m cpc_dsk.seq16.smp_gui`).
+
+- **WAV → `.SMP` bank**: up to 16 samples, converted to the AY-3-8912's 16 measured volume levels. Per-sample settings: name, frequency (4,000 to 16,000 Hz, or the period in NOP), bits, decimation, curve, drive, trim, clean, dither, slicing into N equal parts. Existing `.SMP` banks can be reopened (entry settings only).
+- **Preview**: waveform of the original WAV and of the simulated CPC rendering, on the same time scale, and playback of both.
+- **Memory gauge**: the bank must fit in 16,320 bytes of data (CPC main memory, `#0040-#3FFF`); a bank that is too big cannot be saved.
+- **Save** the `.SMP` file and **add it to a diskette**: the diskette open in the Disk tab (DATA format — it is saved and its catalogue refreshed) or any other `.dsk` file. The file gets an AMSDOS header, as on the CPC.
+- Command line: `python -m cpc_dsk.seq16.wav2smp kick.wav snare.wav -o DRUMS.SMP [--dsk disk.dsk]`.
+
 ### Interface
 
 - **Amstrad CPC** look: firmware palette (blue, bright yellow, cyan), pixel fonts, 4-px relief buttons, reverse-video selection and a blinking `Ready` cursor.
@@ -165,7 +175,8 @@ cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
 | `.dsk` / `.adf` | Diskette, no disk open | the diskette is opened |
 | `.dsk` / `.adf` | Diskette, a disk open | added to the Gotek sources |
 | `.dsk` / `.adf` | Gotek | added to the sources |
-| any other file | either | added to the open diskette |
+| any other file | Diskette / Gotek | added to the open diskette |
+| `.wav` / `.smp` | Samples SEQ-16 | WAV added to the bank / bank opened |
 
 ## Keyboard shortcuts
 
@@ -174,9 +185,10 @@ cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
 | <kbd>F1</kbd> / <kbd>F2</kbd> | Diskette / Gotek tab |
 | <kbd>F3</kbd> | Colour / green monitor |
 | <kbd>F4</kbd> | Files / Sectors view |
-| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open a diskette |
+| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open a diskette (Samples tab: open a `.SMP` bank) |
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | New diskette |
-| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save (Samples tab: save the `.SMP` bank) |
+| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Samples tab: add WAV files |
 | <kbd>Del</kbd> | Delete the selected file or source |
 | <kbd>Enter</kbd> (sector field) | Show the sector |
 
@@ -190,6 +202,11 @@ cpc_dsk/
 ├── data/
 │   └── cpm22_system.bin   CP/M 2.2 + Amsdos 2.0 reference image (46 880 B)
 ├── fonts/            Press Start 2P and VT323 (OFL license)
+├── seq16/            Samples SEQ-16 tab
+│   ├── wav2smp.py    WAV → .SMP conversion (+ command line)
+│   ├── smp_model.py  bank editor model (no GUI)
+│   ├── smp_gui.py    bank editor (tab or standalone window)
+│   └── dskio.py      add a bank to a DATA diskette (through core/amsdos.py)
 └── core/
     ├── adf.py        disk image reader / writer
     ├── amsdos.py     AMSDOS / CP/M catalogue (DATA and SYSTEM formats): read, write, delete

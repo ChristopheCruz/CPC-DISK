@@ -1,6 +1,6 @@
 """Interface graphique (tkinter) de cpc_dsk — habillage « écran CPC » pixel art.
 
-Deux onglets (F1 / F2) :
+Trois onglets (F1 / F2 / clic) :
 
 - **Disquette (.dsk)** : ouvrir / créer / sauvegarder une image, lister les
   fichiers (couches Filer et AMSDOS), ajouter un fichier local, extraire un
@@ -9,6 +9,8 @@ Deux onglets (F1 / F2) :
 - **Gotek (clé USB)** : préparer le répertoire à copier sur la clé USB du
   Gotek (patron de noms, sous-dossier, index de départ), le vérifier, et
   créer une image FAT16 complète (rédacteur intégré, aucune dépendance).
+- **Samples SEQ-16** : éditeur de banques de samples .SMP pour le tracker
+  SEQ-16 (:mod:`cpc_dsk.seq16.smp_gui`), construit au premier affichage.
 
 Habillage :
 - palette du firmware CPC (bleu / jaune vif / cyan) ou moniteur vert GT65
@@ -18,7 +20,8 @@ Habillage :
   police à chasse fixe si elles sont absentes).
 
 Raccourcis : F1/F2 onglets, F3 moniteur, F4 vue fichiers/secteurs, Ctrl+O ouvrir, Ctrl+N nouveau,
-Ctrl+S sauver.
+Ctrl+S sauver. Dans l'onglet Samples : Ctrl+O / Ctrl+S ouvrent / sauvent la
+banque .SMP, Ctrl+W ajoute des WAV.
 
 Lancement:
     python -m cpc_dsk.gui
@@ -627,6 +630,7 @@ class DskEditorApp:
         self._tab = 0
         self._theme_name = "couleur"
         self._blink_id: Optional[str] = None
+        self._smp = None          # éditeur SEQ-16 (SmpApp), créé au 1er affichage
 
         self.sector_var = tk.StringVar(value="0 0")
         self.left_view = tk.StringVar(value="files")  # "files" | "map"
@@ -649,9 +653,11 @@ class DskEditorApp:
         root.bind_all("<F2>", lambda e: self._show_tab(1))
         root.bind_all("<F3>", lambda e: self.toggle_monitor())
         root.bind_all("<F4>", lambda e: self.toggle_left_view())
-        root.bind_all("<Control-o>", lambda e: self.open_disk())
+        # Ctrl+O / Ctrl+S : disquette, ou banque .SMP dans l'onglet Samples.
+        root.bind_all("<Control-o>", lambda e: self._smp_key("open_smp", self.open_disk))
         root.bind_all("<Control-n>", lambda e: self.new_disk())
-        root.bind_all("<Control-s>", lambda e: self.save_disk())
+        root.bind_all("<Control-s>", lambda e: self._smp_key("save_smp", self.save_disk))
+        root.bind_all("<Control-w>", lambda e: self._smp_key("add_wavs", None))
         # Zoom : Ctrl + / Ctrl - / Ctrl 0 (réinitialiser) + molette Ctrl.
         root.bind_all("<Control-minus>", lambda e: self.zoom_out())
         root.bind_all("<Control-equal>", lambda e: self.zoom_in())
@@ -781,6 +787,8 @@ class DskEditorApp:
                 pass
         if hasattr(self, "zoom_lbl"):
             self.zoom_lbl.configure(text=f"{round(self.zoom * 100)} %")
+        if self._smp_attached():
+            self._smp.rescale()
         self._set_status(L("st_zoom", p=round(self.zoom * 100)))
 
     def zoom_in(self) -> None:
@@ -901,7 +909,7 @@ class DskEditorApp:
         tabs = tk.Frame(screen, bg=t.paper)
         tabs.pack(fill="x", pady=(14, 0))
         self._tab_labels: List[tk.Label] = []
-        for i, text in enumerate((L("tab_disk"), L("tab_gotek"))):
+        for i, text in enumerate((L("tab_disk"), L("tab_gotek"), L("tab_samples"))):
             lbl = tk.Label(tabs, text=text, font=self.f_head, padx=18,
                            pady=12, cursor="hand2")
             lbl.pack(side="left", padx=(0, 8))
@@ -925,6 +933,7 @@ class DskEditorApp:
         self.content.pack(fill="both", expand=True, pady=(14, 0))
         self.tab_disk = tk.Frame(self.content, bg=t.paper)
         self.tab_gotek = tk.Frame(self.content, bg=t.paper)
+        self.tab_samples = tk.Frame(self.content, bg=t.paper)  # rempli au 1er affichage
         self._build_disk_tab()
         self._build_gotek_tab()
         self._show_tab(self._tab)
@@ -952,9 +961,42 @@ class DskEditorApp:
         for j, lbl in enumerate(self._tab_labels):
             on = j == i
             lbl.config(bg=t.ink if on else t.panel, fg=t.paper if on else t.acc)
-        (self.tab_gotek if i == 0 else self.tab_disk).pack_forget()
-        (self.tab_disk if i == 0 else self.tab_gotek).pack(fill="both",
-                                                           expand=True)
+        frames = (self.tab_disk, self.tab_gotek, self.tab_samples)
+        for j, frame in enumerate(frames):
+            if j != i:
+                frame.pack_forget()
+        frames[i].pack(fill="both", expand=True)
+        if i == 2:
+            self._ensure_smp()
+
+    # ------------------------------------------------------------------ #
+    # Onglet Samples SEQ-16 (cpc_dsk.seq16.smp_gui)
+    # ------------------------------------------------------------------ #
+    def _smp_attached(self) -> bool:
+        """Vrai si l'éditeur SEQ-16 est construit dans l'onglet actuel."""
+        return (self._smp is not None
+                and getattr(self, "tab_samples", None) is not None
+                and self._smp.parent is self.tab_samples)
+
+    def _ensure_smp(self) -> None:
+        """Construit l'éditeur au premier affichage (import et polices
+        différés), ou le reconstruit dans le nouvel onglet après un
+        changement de thème / langue. La banque en cours est gardée."""
+        if self._smp_attached():
+            return
+        from cpc_dsk.seq16.smp_gui import SmpApp
+        if self._smp is None:
+            self._smp = SmpApp(self.tab_samples, host=self)
+        else:
+            self._smp.attach(self.tab_samples)
+
+    def _smp_key(self, action: str, default) -> None:
+        """Raccourci partagé : action de l'éditeur SEQ-16 si son onglet est
+        affiché, sinon celle de la disquette (ou rien)."""
+        if self._tab == 2 and self._smp_attached():
+            getattr(self._smp, action)()
+        elif default is not None:
+            default()
 
     def _blink(self, on: bool) -> None:
         try:
@@ -2023,6 +2065,9 @@ class DskEditorApp:
           ouverte),
         - autres fichiers : ajoutés à la disquette ouverte (dialogue 8.3).
         """
+        if self._tab == 2 and self._smp_attached():
+            self._smp._on_drop(paths)          # .wav / .smp pour l'éditeur SEQ-16
+            return
         disks = [p for p in paths if p.lower().endswith((".dsk", ".adf"))]
         others = [p for p in paths if p not in disks]
 
