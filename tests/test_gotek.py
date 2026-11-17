@@ -171,6 +171,91 @@ def test_list_fat_image_rejects_junk(tmp_path):
         list_fat_image(p)
 
 
+def _make_minimal_fat32() -> bytes:
+    """Mini-volume FAT32 déterministe (512 o/secteur, 1 secteur/cluster).
+
+    32 secteurs réservés + 2 FAT de 8 secteurs + 64 clusters de données.
+    Racine = cluster 2 (chaîne simple) ; F1.ADF = chaîne de 2 clusters
+    (3→4, 1024 o) ; F2.ADF = 300 o dans le cluster 5.
+    """
+    bps, spc, reserved, nfats = 512, 1, 32, 2
+    fatsz, root_cluster, n_clusters = 8, 2, 64
+    total_sec = reserved + nfats * fatsz + n_clusters * spc
+    img = bytearray(total_sec * bps)
+
+    # BPB minimal (seuls les champs lus par list_fat_image).
+    struct.pack_into("<H", img, 0x0B, bps)
+    img[0x0D] = spc
+    struct.pack_into("<H", img, 0x0E, reserved)
+    img[0x10] = nfats
+    struct.pack_into("<H", img, 0x11, 0)           # rootent = 0 (FAT32)
+    struct.pack_into("<H", img, 0x16, 0)           # fatsz16 = 0
+    struct.pack_into("<I", img, 0x24, fatsz)
+    struct.pack_into("<I", img, 0x2C, root_cluster)
+    img[510:512] = b"\x55\xaa"
+
+    # FAT (deux copies identiques) : 1024 entrées de 4 octets.
+    fat_off = reserved * bps
+    for t in range(nfats):
+        base = fat_off + t * fatsz * bps
+        struct.pack_into("<I", img, base + 4 * 0, 0x0FFFFFF5)  # média
+        struct.pack_into("<I", img, base + 4 * 1, 0x0FFFFFFF)  # EOC
+        struct.pack_into("<I", img, base + 4 * 2, 0x0FFFFFFF)  # racine
+        struct.pack_into("<I", img, base + 4 * 3, 4)           # F1: 3→4
+        struct.pack_into("<I", img, base + 4 * 4, 0x0FFFFFFF)
+        struct.pack_into("<I", img, base + 4 * 5, 0x0FFFFFFF)  # F2: 5→EOC
+
+    # Zone de données : cluster N @ (data_start + (N-2) * spc) * bps.
+    data_start = fat_off + nfats * fatsz * bps
+    c = lambda n: data_start + (n - 2) * spc * bps  # noqa: E731
+    img[c(3):c(3) + 512] = b"\x11" * 512
+    img[c(4):c(4) + 512] = b"\x22" * 512
+    img[c(5):c(5) + 300] = b"\x33" * 300
+
+    # Entrées racine (dans le cluster 2).
+    def entry(i, name83: bytes, size: int, first: int) -> None:
+        e = c(2) + 32 * i
+        img[e:e + 11] = name83
+        img[e + 11] = 0x20                          # archive
+        struct.pack_into("<I", img, e + 20, first)  # départ (FAT32)
+        struct.pack_into("<I", img, e + 28, size)
+
+    entry(0, b"F1      ADF", 1024, 3)
+    entry(1, b"F2      ADF", 300, 5)
+    return bytes(img)
+
+
+def test_list_fat_image_fat32(tmp_path):
+    """Volume FAT32 (clés USB réelles > 32 Mo) : racine en clusters et
+    chaînes de fichiers lues intégralement."""
+    p = str(tmp_path / "key32.img")
+    with open(p, "wb") as fh:
+        fh.write(_make_minimal_fat32())
+    files = list_fat_image(p)
+    assert [f.name for f in files] == ["F1.ADF", "F2.ADF"]
+    assert files[0].size == 1024
+    assert files[0].data == b"\x11" * 512 + b"\x22" * 512
+    assert files[1].size == 300
+    assert files[1].data == b"\x33" * 300
+
+
+def test_list_fat_image_rejects_fat12(tmp_path):
+    """BPB FAT12 (table < 64 Ko) : rejet explicite."""
+    p = str(tmp_path / "fat12.img")
+    img = bytearray(512 * 8)
+    struct.pack_into("<H", img, 0x0B, 512)
+    img[0x0D] = 1
+    struct.pack_into("<H", img, 0x0E, 1)
+    img[0x10] = 2
+    struct.pack_into("<H", img, 0x11, 64)
+    struct.pack_into("<H", img, 0x16, 1)   # FAT de 1 secteur → FAT12
+    img[510:512] = b"\x55\xaa"
+    with open(p, "wb") as fh:
+        fh.write(img)
+    with pytest.raises(GotekError):
+        list_fat_image(p)
+
+
 def test_fat_image_full_roundtrip_disk_contents(tmp_path):
     """Aller-retour complet : disque réel → image FAT16 → list_fat_image →
     disquettes réécrites et rechargées → catalogue et données identiques.

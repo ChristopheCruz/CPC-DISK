@@ -166,17 +166,20 @@ class FatFile:
 
 
 def list_fat_image(path: str) -> List[FatFile]:
-    """Lit une image FAT16 (``.img`` de clé Gotek) et renvoie ses fichiers.
+    """Lit une image FAT16 ou FAT32 (``.img`` de clé Gotek) et renvoie ses
+    fichiers.
 
-    Analyse le secteur d'amorçage (BPB), la table FAT16 et le répertoire
-    racine, puis reconstitue chaque fichier en suivant sa chaîne de
-    clusters. Les entrées « volume ID », supprimées (0xE5), les dossiers
-    et les entrées LFN sont ignorés.
+    Analyse le secteur d'amorçage (BPB), la table FAT et le répertoire
+    racine (région fixe pour FAT16, chaîne de clusters pour FAT32), puis
+    reconstitue chaque fichier en suivant sa chaîne de clusters. Les
+    entrées « volume ID », supprimées (0xE5), les dossiers et les entrées
+    LFN sont ignorées.
 
     Renvoie la liste des :class:`FatFile` de la racine (noms au format
     ``BASE.EXT``). Lève :class:`GotekError` si le fichier n'est pas une
-    image FAT16 lisible (le rédacteur intégré produit de la FAT16, ~32 Mo
-    max — les volumes FAT12/FAT32 ne sont pas supportés).
+    image FAT lisible : FAT16 (le rédacteur intégré produit de la FAT16,
+    ~32 Mo) et FAT32 (clés USB réelles de plus de 32 Mo, images ``dd``)
+    sont supportés ; FAT12 ne l'est pas.
     """
     with open(path, "rb") as fh:
         img = fh.read()
@@ -191,40 +194,56 @@ def list_fat_image(path: str) -> List[FatFile]:
     nfats = img[0x10]
     rootent = struct.unpack_from("<H", img, 0x11)[0]
     fatsz16 = struct.unpack_from("<H", img, 0x16)[0]
-    if (not bps or not spc or not reserved or not 1 <= nfats <= 4
-            or not rootent):
+    fatsz32 = struct.unpack_from("<I", img, 0x24)[0]
+    if not bps or not spc or not reserved or not 1 <= nfats <= 4:
         raise GotekError("BPB incohérent : ce fichier n'est pas une image FAT.")
-    if not fatsz16:
-        raise GotekError(
-            "Image FAT12/FAT32 non supportée : cet outil lit les images "
-            "FAT16 (rédacteur intégré, ~32 Mo max).")
+
+    fat32 = fatsz16 == 0
+    if fat32:
+        if not fatsz32:
+            raise GotekError(
+                "BPB incohérent : ce fichier n'est pas une image FAT.")
+    elif not rootent:
+        raise GotekError("BPB incohérent : ce fichier n'est pas une image FAT.")
 
     fat_off = reserved * bps
-    fat_size = fatsz16 * bps
-    if fat_off + 2 * nfats * fat_size > len(img):
+    fat_size = (fatsz32 if fat32 else fatsz16) * bps
+    if fat_off + nfats * fat_size > len(img):
         raise GotekError("Image tronquée : les tables FAT dépassent le fichier.")
     fat = img[fat_off:fat_off + fat_size]
 
-    root_off = fat_off + nfats * fat_size
-    root_bytes = rootent * 32
-    if root_off + root_bytes > len(img):
-        raise GotekError("Image tronquée : le répertoire racine dépasse le "
-                         "fichier.")
-    data_start_sec = root_off // bps + (root_bytes + bps - 1) // bps
-    n_entries = len(fat) // 2
+    if not fat32:
+        # Règle Microsoft : moins de 4085 clusters de données = FAT12
+        # (la taille de la table FAT seule ne suffit pas à trancher).
+        data_start_cls = (fat_off + nfats * fat_size) // bps + \
+            (rootent * 32 + bps - 1) // bps
+        n_data_clusters = (len(img) // bps - data_start_cls) // spc
+        if n_data_clusters < 4085:
+            raise GotekError(
+                "Image FAT12 non supportée : cet outil lit les images "
+                "FAT16 et FAT32.")
 
-    def fat16(c: int) -> int:
+    eoc = 0x0FFFFFFF if fat32 else 0xFFF8
+
+    def fat_entry(c: int) -> int:
+        if fat32:
+            return struct.unpack_from("<I", fat, 4 * c)[0] & 0x0FFFFFFF
         return struct.unpack_from("<H", fat, 2 * c)[0]
+
+    data_start_sec = (fat_off + nfats * fat_size) // bps
+    if not fat32:
+        data_start_sec += (rootent * 32 + bps - 1) // bps
+    n_entries = len(fat) // (4 if fat32 else 2)
 
     def read_chain(first: int, size: int) -> bytes:
         if size == 0:
             return b""
-        if not (2 <= first < 0xFFF8):
+        if not (2 <= first < eoc) or first >= n_entries:
             return b"\x00" * size  # entrée corrompue : données inconnues
         out = bytearray()
         c = first
         for _ in range(100000):  # garde contre une chaîne cyclique
-            if not (2 <= c < 0xFFF8) or c >= n_entries:
+            if not (2 <= c < eoc) or c >= n_entries:
                 break
             off = (data_start_sec + (c - 2) * spc) * bps
             if off + bps > len(img):
@@ -232,12 +251,25 @@ def list_fat_image(path: str) -> List[FatFile]:
             out += img[off:off + bps]
             if len(out) >= size:
                 break
-            c = fat16(c)
+            c = fat_entry(c)
         return bytes(out[:size])
 
+    # Répertoire racine : région fixe (FAT16) ou chaîne de clusters (FAT32).
+    if fat32:
+        root_cluster = struct.unpack_from("<I", img, 0x2C)[0]
+        bound = max(0, len(img) - data_start_sec * bps)
+        root_data = read_chain(root_cluster, bound)
+    else:
+        root_off = fat_off + nfats * fat_size
+        root_bytes = rootent * 32
+        if root_off + root_bytes > len(img):
+            raise GotekError("Image tronquée : le répertoire racine dépasse le "
+                             "fichier.")
+        root_data = img[root_off:root_off + root_bytes]
+
     files: List[FatFile] = []
-    for i in range(rootent):
-        ent = img[root_off + 32 * i:root_off + 32 * (i + 1)]
+    for i in range(len(root_data) // 32):
+        ent = root_data[32 * i:32 * (i + 1)]
         if ent[0] in (0x00, 0xE5):
             continue
         attr = ent[11]
@@ -249,7 +281,10 @@ def list_fat_image(path: str) -> List[FatFile]:
         if not name:
             continue
         size = struct.unpack_from("<I", ent, 28)[0]
-        first = struct.unpack_from("<H", ent, 26)[0]
+        if fat32:
+            first = struct.unpack_from("<I", ent, 20)[0] & 0x0FFFFFFF
+        else:
+            first = struct.unpack_from("<H", ent, 26)[0]
         files.append(FatFile(name=name, size=size,
                              data=read_chain(first, size)))
     return files
