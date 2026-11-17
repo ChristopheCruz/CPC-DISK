@@ -6,6 +6,7 @@ import struct
 import pytest
 
 from cpc_dsk.core.adf import ADFDisk
+from cpc_dsk.core.cpcfs import CpcFilesystem, FT_BASIC, FT_BINARY
 from cpc_dsk.core.gotek import (
     GotekConfig,
     GotekError,
@@ -168,6 +169,61 @@ def test_list_fat_image_rejects_junk(tmp_path):
         fh.write(b"\x00" * 8192)
     with pytest.raises(GotekError):
         list_fat_image(p)
+
+
+def test_fat_image_full_roundtrip_disk_contents(tmp_path):
+    """Aller-retour complet : disque réel → image FAT16 → list_fat_image →
+    disquettes réécrites et rechargées → catalogue et données identiques.
+
+    Va au-delà de l'aller-retour byte-level : les disquettes obtenues de
+    l'image doivent rester de vraies disques CPC lisibles (fichiers,
+    calques Filer/AMSDOS, types et données).
+    """
+    # 1. Disque source avec de vrais fichiers (BASIC double calque +
+    #    binaire Filer uniquement).
+    src = str(tmp_path / "monprog.dsk")
+    disk = ADFDisk.new_blank()
+    fs = CpcFilesystem(disk)
+    prog = bytes((i * 7 + 3) % 256 for i in range(1536))
+    fs.write_file("MONPROG BAS", prog, file_type=FT_BASIC,
+                  load_addr=0x0320, exec_addr=0x0320)
+    blob = bytes((i * 13 + 11) % 256 for i in range(2048))
+    fs.write_file("DATABIN BIN", blob, file_type=FT_BINARY,
+                  load_addr=0x4000, mode="filer")
+    disk.save(src)
+    src_bytes = open(src, "rb").read()
+
+    orig = CpcFilesystem(ADFDisk.load(src))
+    orig_cat = sorted((f.name, f.source, f.type_name, f.length)
+                      for f in orig.list_files())
+    orig_data = {(f.name, f.source): orig.read_file(f.name,
+                                                    source=f.source)
+                 for f in orig.list_files()}
+
+    # 2. Image FAT16 (3 copies → DISK001..003.ADF, chaînes multi-clusters).
+    img = str(tmp_path / "cle.img")
+    create_fat_image(img, [src, src, src], GotekConfig(), size_mb=4)
+
+    # 3. Relecture : noms, tailles, données byte-par-byte.
+    files = list_fat_image(img)
+    assert [f.name for f in files] == ["DISK001.ADF", "DISK002.ADF",
+                                       "DISK003.ADF"]
+    assert all(f.size == len(src_bytes) for f in files)
+    assert all(f.data == src_bytes for f in files)
+
+    # 4. Réécriture sur disque, rechargement, comparaison catalogue +
+    #    données fichier par fichier.
+    for i, f in enumerate(files, start=1):
+        out = str(tmp_path / f"reloaded_{i}.adf")
+        with open(out, "wb") as fh:
+            fh.write(f.data)
+        rfs = CpcFilesystem(ADFDisk.load(out))
+        new_cat = sorted((g.name, g.source, g.type_name, g.length)
+                         for g in rfs.list_files())
+        assert new_cat == orig_cat
+        for g in rfs.list_files():
+            assert rfs.read_file(g.name, source=g.source) == \
+                orig_data[(g.name, g.source)]
 
 
 def test_prepare_and_verify_usb_directory(tmp_path):
