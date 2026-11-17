@@ -73,6 +73,8 @@ TR: Dict[str, Dict[str, str]] = {
                       "feed the Gotek tab), others are added to the open "
                       "diskette."),
         "st_dnd_off": "Ready. (drag & drop inactive)",
+        "st_zoom": "Zoom: {p} % — Ctrl + / Ctrl - / Ctrl 0 (reset)",
+        "lbl_zoom": "ZOOM",
         "lbl_no_disk": "A: (no disk)",
         "lbl_geometry": "Geometry: —",
         "sum_geometry": ("format={fmt} tracks={tracks} sides={sides} "
@@ -258,6 +260,8 @@ TR: Dict[str, Dict[str, str]] = {
                       ".dsk/.adf s'ouvrent (ou alimentent l'onglet Gotek), "
                       "les autres s'ajoutent à la disquette ouverte."),
         "st_dnd_off": "Prêt. (glisser-déposer non actif)",
+        "st_zoom": "Zoom : {p} % — Ctrl + / Ctrl - / Ctrl 0 (réinitialiser)",
+        "lbl_zoom": "ZOOM",
         "lbl_no_disk": "A: (aucun disque)",
         "lbl_geometry": "Géométrie : —",
         "sum_geometry": ("format={fmt} pistes={tracks} faces={sides} "
@@ -445,6 +449,8 @@ TR: Dict[str, Dict[str, str]] = {
                       "se abren (o alimentan la pestaña Gotek), los demás "
                       "se añaden a la disquete abierta."),
         "st_dnd_off": "Listo. (arrastrar y soltar inactivo)",
+        "st_zoom": "Zoom: {p} % — Ctrl + / Ctrl - / Ctrl 0 (restablecer)",
+        "lbl_zoom": "ZOOM",
         "lbl_no_disk": "A: (sin disquete)",
         "lbl_geometry": "Geometría: —",
         "sum_geometry": ("formato={fmt} pistas={tracks} caras={sides} "

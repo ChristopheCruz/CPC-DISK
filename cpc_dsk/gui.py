@@ -311,12 +311,8 @@ class PixelButton(tk.Canvas):
         self._icon = icon
         self._cmd = command
         self._font = app.f_btn
-        tw = self._font.measure(self._text) if self._text else 0
-        iw = 16 if icon else 0
-        gap = 10 if (icon and self._text) else 0
-        self._content_w = tw + iw + gap
-        self._bw = self._content_w + 2 * padx + 8
-        self._bh = max(42, self._font.metrics("linespace") + 24)
+        self._padx = padx
+        self._bw, self._bh = 10, 10  # provisoire, recalculé par _relayout
         super().__init__(master, width=self._bw, height=self._bh,
                          bg=master.cget("bg"), highlightthickness=0, bd=0,
                          cursor="hand2", takefocus=1)
@@ -329,6 +325,21 @@ class PixelButton(tk.Canvas):
         self.bind("<FocusOut>", lambda e: self._set(focus=False))
         self.bind("<space>", lambda e: self.invoke())
         self.bind("<Return>", lambda e: self.invoke())
+        self._relayout()
+        reg = getattr(app, "_zoomables", None)
+        if reg is not None:
+            reg.append(self)
+
+    def _relayout(self) -> None:
+        """Recalcule la géométrie selon la police courante et redessine
+        (appelé à la création puis à chaque changement de zoom)."""
+        tw = self._font.measure(self._text) if self._text else 0
+        iw = 16 if self._icon else 0
+        gap = 10 if (self._icon and self._text) else 0
+        self._content_w = tw + iw + gap
+        self._bw = self._content_w + 2 * self._padx + 8
+        self._bh = max(42, self._font.metrics("linespace") + 24)
+        self.configure(width=self._bw, height=self._bh)
         self._draw()
 
     def invoke(self) -> None:
@@ -585,6 +596,8 @@ class DskEditorApp:
         _set_lang(self._lang)
         self.root.title(L("win_title"))
         self.scale = max(1.0, root.winfo_fpixels("1i") / 96)  # 1.25 à 125 %
+        self.zoom = 1.0           # zoom utilisateur (multiplie l'échelle DPI)
+        self._zoomables: List = []  # widgets dessinés sur mesure (redessinés au zoom)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         w = min(round(1440 * self.scale), sw - 60)
         h = min(round(960 * self.scale), sh - 90)
@@ -636,6 +649,15 @@ class DskEditorApp:
         root.bind_all("<Control-o>", lambda e: self.open_disk())
         root.bind_all("<Control-n>", lambda e: self.new_disk())
         root.bind_all("<Control-s>", lambda e: self.save_disk())
+        # Zoom : Ctrl + / Ctrl - / Ctrl 0 (réinitialiser) + molette Ctrl.
+        root.bind_all("<Control-minus>", lambda e: self.zoom_out())
+        root.bind_all("<Control-equal>", lambda e: self.zoom_in())
+        root.bind_all("<Control-0>", lambda e: self.zoom_reset())
+        root.bind_all("<Control-KP_Subtract>", lambda e: self.zoom_out())
+        root.bind_all("<Control-KP_Add>", lambda e: self.zoom_in())
+        root.bind_all("<Control-MouseWheel>", self._on_zoom_wheel)
+        root.bind_all("<Control-Button-4>", self._on_zoom_wheel)
+        root.bind_all("<Control-Button-5>", self._on_zoom_wheel)
 
         # Glisser-déposer depuis l'explorateur Windows.
         if _register_drag_drop(root, self._on_drop):
@@ -648,36 +670,61 @@ class DskEditorApp:
     # ------------------------------------------------------------------ #
     def _setup_fonts(self) -> None:
         families = set(tkfont.families(self.root))
-        mono = next((f for f in ("Consolas", "Lucida Console", "Menlo",
-                                 "DejaVu Sans Mono", "Courier New", "Courier")
-                     if f in families), "TkFixedFont")
-        has_title = PIXEL_TITLE in families
-        has_body = PIXEL_BODY in families
-        self.pixel_fonts = has_title and has_body
-        self.has_title_font = has_title
+        self._mono = next((f for f in ("Consolas", "Lucida Console", "Menlo",
+                                       "DejaVu Sans Mono", "Courier New",
+                                       "Courier")
+                           if f in families), "TkFixedFont")
+        self._has_title = PIXEL_TITLE in families
+        self._has_body = PIXEL_BODY in families
+        self.pixel_fonts = self._has_title and self._has_body
+        self.has_title_font = self._has_title
+        # Objets de polices nommés, créés une fois ; leurs tailles sont
+        # (re)configurées à chaque changement de zoom par _apply_font_sizes.
+        if self._has_title:
+            self.f_title = tkfont.Font(family=PIXEL_TITLE)
+            self.f_head = tkfont.Font(family=PIXEL_TITLE)
+            self.f_btn = tkfont.Font(family=PIXEL_TITLE)
+        else:
+            self.f_title = tkfont.Font(family=self._mono, weight="bold")
+            self.f_head = tkfont.Font(family=self._mono, weight="bold")
+            self.f_btn = tkfont.Font(family=self._mono, weight="bold")
+        if self._has_body:
+            self.f_body = tkfont.Font(family=PIXEL_BODY)
+            self.f_mono = tkfont.Font(family=PIXEL_BODY)
+            self.f_small = tkfont.Font(family=PIXEL_BODY)
+        else:
+            self.f_body = tkfont.Font(family=self._mono)
+            self.f_mono = tkfont.Font(family=self._mono)
+            self.f_small = tkfont.Font(family=self._mono)
+        self._apply_font_sizes()
+
+    def _apply_font_sizes(self) -> None:
+        """(Ré)applique les tailles selon l'échelle DPI × zoom utilisateur."""
+        s = self.scale * self.zoom
+
         def px8(base: float) -> int:
             # Press Start 2P : toujours un multiple de 8 px (8, 16, 24, 32…)
-            return -8 * max(1, round(base * self.scale / 8))
+            return -8 * max(1, round(base * s / 8))
 
         def px(base: float) -> int:
-            return -round(base * self.scale)
+            return -round(base * s)
 
-        if has_title:
-            self.f_title = tkfont.Font(family=PIXEL_TITLE, size=px8(22))
-            self.f_head = tkfont.Font(family=PIXEL_TITLE, size=px8(13))
-            self.f_btn = tkfont.Font(family=PIXEL_TITLE, size=px8(13))
+        if self._has_title:
+            self.f_title.configure(size=px8(22))
+            self.f_head.configure(size=px8(13))
+            self.f_btn.configure(size=px8(13))
         else:
-            self.f_title = tkfont.Font(family=mono, size=px(26), weight="bold")
-            self.f_head = tkfont.Font(family=mono, size=px(14), weight="bold")
-            self.f_btn = tkfont.Font(family=mono, size=px(14), weight="bold")
-        if has_body:
-            self.f_body = tkfont.Font(family=PIXEL_BODY, size=px(22))
-            self.f_mono = tkfont.Font(family=PIXEL_BODY, size=px(21))
-            self.f_small = tkfont.Font(family=PIXEL_BODY, size=px(16))
+            self.f_title.configure(size=px(26))
+            self.f_head.configure(size=px(14))
+            self.f_btn.configure(size=px(14))
+        if self._has_body:
+            self.f_body.configure(size=px(22))
+            self.f_mono.configure(size=px(21))
+            self.f_small.configure(size=px(16))
         else:
-            self.f_body = tkfont.Font(family=mono, size=px(16))
-            self.f_mono = tkfont.Font(family=mono, size=px(15))
-            self.f_small = tkfont.Font(family=mono, size=px(12))
+            self.f_body.configure(size=px(16))
+            self.f_mono.configure(size=px(15))
+            self.f_small.configure(size=px(12))
 
     def caps(self, text: str) -> str:
         """Majuscules ; sans accents avec Press Start 2P, qui n'a pas de
@@ -716,6 +763,40 @@ class DskEditorApp:
                          lightcolor=t.acc, darkcolor=t.acc, gripcount=0,
                          relief="flat", arrowsize=16)
             st.map(name, background=[("active", t.hi), ("pressed", t.ink)])
+
+    # ------------------------------------------------------------------ #
+    # Zoom (échelle DPI × facteur utilisateur)
+    # ------------------------------------------------------------------ #
+    def _apply_zoom(self) -> None:
+        """Applique self.zoom : polices, styles ttk et widgets dessinés."""
+        self._apply_font_sizes()
+        self._apply_theme()
+        for w in list(self._zoomables):
+            try:
+                w._relayout()
+            except tk.TclError:
+                pass
+        if hasattr(self, "zoom_lbl"):
+            self.zoom_lbl.configure(text=f"{round(self.zoom * 100)} %")
+        self._set_status(L("st_zoom", p=round(self.zoom * 100)))
+
+    def zoom_in(self) -> None:
+        self.zoom = min(2.0, round(self.zoom + 0.1, 2))
+        self._apply_zoom()
+
+    def zoom_out(self) -> None:
+        self.zoom = max(0.5, round(self.zoom - 0.1, 2))
+        self._apply_zoom()
+
+    def zoom_reset(self) -> None:
+        self.zoom = 1.0
+        self._apply_zoom()
+
+    def _on_zoom_wheel(self, event) -> None:
+        if getattr(event, "delta", 0) > 0 or getattr(event, "num", 0) == 4:
+            self.zoom_in()
+        elif getattr(event, "delta", 0) < 0 or getattr(event, "num", 0) == 5:
+            self.zoom_out()
 
     def toggle_monitor(self) -> None:
         """Bascule couleur (CTM644) <-> moniteur vert (GT65)."""
@@ -794,6 +875,20 @@ class DskEditorApp:
         Segmented(right, self, self.lang_var,
                   [("en", "EN"), ("fr", "FR"), ("es", "ES")]).pack(
             side="right", padx=(0, 18))
+        # --- zoom (ZOOM  -  100 %  +) : l'étiquette % réinitialise ---
+        zfrm = tk.Frame(right, bg=t.paper)
+        zfrm.pack(side="right", padx=(0, 18))
+        self._label(zfrm, L("lbl_zoom"), fg=t.dim, font=self.f_small).pack(
+            side="left", padx=(0, 6))
+        PixelButton(zfrm, self, "-", command=self.zoom_out, padx=6).pack(
+            side="left")
+        self.zoom_lbl = tk.Label(zfrm, text="100 %", font=self.f_btn,
+                                 bg=t.paper, fg=t.ink, padx=4,
+                                 cursor="hand2")
+        self.zoom_lbl.pack(side="left", padx=(4, 4))
+        self.zoom_lbl.bind("<Button-1>", lambda e: self.zoom_reset())
+        PixelButton(zfrm, self, "+", command=self.zoom_in, padx=6).pack(
+            side="left")
         stripes = tk.Frame(right, bg=t.paper)
         stripes.pack(side="right", padx=(0, 18))
         for c in (t.r, t.g, t.b):
