@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cpc-dsk"
-version = "0.1.0"
+version = "1.2.0"
 description = "Éditeur de disquettes virtuelles .dsk (format ADF) et d'images USB Gotek pour Amstrad CPC"
 readme = "README.md"
 requires-python = ">=3.9"
