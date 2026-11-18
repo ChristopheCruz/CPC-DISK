@@ -159,11 +159,8 @@ _OFF_SYS1 = 1024
 _OFF_SYS2 = 1536
 _OFF_TRACK1 = 2048
 _OFF_TRACK1_END = _OFF_TRACK1 + CPM_TRACK_DATA_SIZE    # 6656
-_OFF_DIR5 = 6656
-_OFF_DIR5_END = _OFF_DIR5 + 5 * DIR_ENTRY_SIZE         # 6816
-_OFF_UTILS_PACK = 6816
-CPM22_SYSTEM_SIZE = 46880
-_UTILS_PACK_SIZE = CPM22_SYSTEM_SIZE - _OFF_UTILS_PACK  # 40064
+_OFF_UTILS = 6656     # utilitaires : nom 8+3 (11 o) + longueur LE32 + données
+CPM22_SYSTEM_SIZE = 46780   # cf. scripts/make_cpm_reference.py
 
 __all__ = [
     "CPM_TRACKS", "CPM_SIDES", "CPM_SECTORS", "CPM_SECTOR_SIZE",
@@ -394,11 +391,25 @@ def new_cpm_system_disk(with_utils: bool = True,
     disk.set_track_data(1, ref[_OFF_TRACK1:_OFF_TRACK1_END])
 
     if with_utils:
-        helper = CpcFilesystem(disk)
-        helper._write_linear(CPM_DIR_OFFSET, ref[_OFF_DIR5:_OFF_DIR5_END])
-        helper._write_linear(CPM_PACK_START,
-                             ref[_OFF_UTILS_PACK:CPM22_SYSTEM_SIZE])
+        # Écrits par le vrai catalogue CP/M (blocs de 1 Ko repérés par ID de
+        # secteur) : le CP/M de la machine les retrouve à l'identique.
+        from cpc_dsk.core.amsdos import AmsdosFilesystem, SYSTEM
+        fs = AmsdosFilesystem(disk, SYSTEM)
+        for name, data in _reference_utils(ref):
+            fs.write_file(name, data, mode="raw")
     return disk
+
+
+def _reference_utils(ref: bytes) -> List[Tuple[str, bytes]]:
+    """Utilitaires rangés dans l'image de référence : [(nom 8+3, données)]."""
+    out = []
+    pos = _OFF_UTILS
+    while pos < len(ref):
+        field11 = ref[pos:pos + 11].decode("latin1")
+        (n,) = struct.unpack_from("<I", ref, pos + 11)
+        out.append((field11, ref[pos + 15:pos + 15 + n]))
+        pos += 15 + n
+    return out
 
 
 # --------------------------------------------------------------------------- #

@@ -1,6 +1,6 @@
 """Interface graphique (tkinter) de cpc_dsk — habillage « écran CPC » pixel art.
 
-Deux onglets (F1 / F2) :
+Trois onglets (F1 / F2 / clic) :
 
 - **Disquette (.dsk)** : ouvrir / créer / sauvegarder une image, lister les
   fichiers (couches Filer et AMSDOS), ajouter un fichier local, extraire un
@@ -9,6 +9,8 @@ Deux onglets (F1 / F2) :
 - **Gotek (clé USB)** : préparer le répertoire à copier sur la clé USB du
   Gotek (patron de noms, sous-dossier, index de départ), le vérifier, et
   créer une image FAT16 complète (rédacteur intégré, aucune dépendance).
+- **Samples SEQ-16** : éditeur de banques de samples .SMP pour le tracker
+  SEQ-16 (:mod:`cpc_dsk.seq16.smp_gui`), construit au premier affichage.
 
 Habillage :
 - palette du firmware CPC (bleu / jaune vif / cyan) ou moniteur vert GT65
@@ -18,7 +20,8 @@ Habillage :
   police à chasse fixe si elles sont absentes).
 
 Raccourcis : F1/F2 onglets, F3 moniteur, F4 vue fichiers/secteurs, Ctrl+O ouvrir, Ctrl+N nouveau,
-Ctrl+S sauver.
+Ctrl+S sauver. Dans l'onglet Samples : Ctrl+O / Ctrl+S ouvrent / sauvent la
+banque .SMP, Ctrl+W ajoute des WAV.
 
 Lancement:
     python -m cpc_dsk.gui
@@ -38,7 +41,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from cpc_dsk.core.adf import ADFDisk, ADFError
 from cpc_dsk.core.cpcfs import CpcError, CpcFile, CpcFilesystem, FT_BASIC, FT_BINARY
-from cpc_dsk.core.cpm import CpmFilesystem, is_cpm_disk, new_cpm_system_disk
+from cpc_dsk.core.amsdos import AmsdosFile, AmsdosFilesystem, detect_format
+from cpc_dsk.core.cpm import is_cpm_disk, new_cpm_system_disk
 from cpc_dsk.core.gotek import (
     DEFAULT_NAME_PATTERN,
     FatFile,
@@ -503,7 +507,7 @@ class AddFileDialog:
     """Fenêtre modale : nom 8.3, type, adresse de chargement, couche."""
 
     def __init__(self, app: "DskEditorApp", default_name: str,
-                 cpm: bool = False):
+                 cpm: bool = False, amsdos: bool = True):
         t = app.t
         self.app = app
         self.cpm = cpm
@@ -523,10 +527,12 @@ class AddFileDialog:
         self.name = tk.StringVar(value=default_name)
         self.ftype = tk.StringVar(value="binary")
         self.load = tk.StringVar(value="0x4000")
-        # Filer d'abord (DOS d'origine, lu par le Gotek sur matériel réel) ;
-        # « both » pour un disque lisible aussi par les émulateurs AMSDOS.
-        # Disque CP/M : répertoire CP/M (lu par le vrai BDOS) ou objet AMSDOS.
-        self.fs = tk.StringVar(value="cpm" if cpm else "filer")
+        # Disquette AMSDOS (DATA ou CP/M) : avec en-tête AMSDOS (binaire,
+        # BASIC : ce qu'écrit SAVE) ou données brutes (texte, programme
+        # CP/M). Format inconnu : anciennes couches Filer / AMSDOS.
+        self.amsdos = amsdos
+        self.fs = tk.StringVar(value=("raw" if cpm else "amsdos") if amsdos
+                               else "filer")
 
         def label(text, row):
             tk.Label(frm, text=text, bg=t.panel, fg=t.acc, font=app.f_body,
@@ -545,9 +551,9 @@ class AddFileDialog:
         app.entry(frm, self.load, width=10).grid(row=2, column=1, sticky="w",
                                                  pady=6)
         label(L("add_layer"), 3)
-        if cpm:
-            layers = [("cpm", L("layer_cpm")),
-                      ("amsdos", L("layer_amsdos"))]
+        if amsdos:
+            layers = [("amsdos", L("layer_header")),
+                      ("raw", L("layer_raw"))]
         else:
             layers = [("filer", L("layer_filer")),
                       ("both", L("layer_both")),
@@ -624,6 +630,7 @@ class DskEditorApp:
         self._tab = 0
         self._theme_name = "couleur"
         self._blink_id: Optional[str] = None
+        self._smp = None          # éditeur SEQ-16 (SmpApp), créé au 1er affichage
 
         self.sector_var = tk.StringVar(value="0 0")
         self.left_view = tk.StringVar(value="files")  # "files" | "map"
@@ -646,9 +653,11 @@ class DskEditorApp:
         root.bind_all("<F2>", lambda e: self._show_tab(1))
         root.bind_all("<F3>", lambda e: self.toggle_monitor())
         root.bind_all("<F4>", lambda e: self.toggle_left_view())
-        root.bind_all("<Control-o>", lambda e: self.open_disk())
+        # Ctrl+O / Ctrl+S : disquette, ou banque .SMP dans l'onglet Samples.
+        root.bind_all("<Control-o>", lambda e: self._smp_key("open_smp", self.open_disk))
         root.bind_all("<Control-n>", lambda e: self.new_disk())
-        root.bind_all("<Control-s>", lambda e: self.save_disk())
+        root.bind_all("<Control-s>", lambda e: self._smp_key("save_smp", self.save_disk))
+        root.bind_all("<Control-w>", lambda e: self._smp_key("add_wavs", None))
         # Zoom : Ctrl + / Ctrl - / Ctrl 0 (réinitialiser) + molette Ctrl.
         root.bind_all("<Control-minus>", lambda e: self.zoom_out())
         root.bind_all("<Control-equal>", lambda e: self.zoom_in())
@@ -778,6 +787,8 @@ class DskEditorApp:
                 pass
         if hasattr(self, "zoom_lbl"):
             self.zoom_lbl.configure(text=f"{round(self.zoom * 100)} %")
+        if self._smp_attached():
+            self._smp.rescale()
         self._set_status(L("st_zoom", p=round(self.zoom * 100)))
 
     def zoom_in(self) -> None:
@@ -898,7 +909,7 @@ class DskEditorApp:
         tabs = tk.Frame(screen, bg=t.paper)
         tabs.pack(fill="x", pady=(14, 0))
         self._tab_labels: List[tk.Label] = []
-        for i, text in enumerate((L("tab_disk"), L("tab_gotek"))):
+        for i, text in enumerate((L("tab_disk"), L("tab_gotek"), L("tab_samples"))):
             lbl = tk.Label(tabs, text=text, font=self.f_head, padx=18,
                            pady=12, cursor="hand2")
             lbl.pack(side="left", padx=(0, 8))
@@ -922,6 +933,7 @@ class DskEditorApp:
         self.content.pack(fill="both", expand=True, pady=(14, 0))
         self.tab_disk = tk.Frame(self.content, bg=t.paper)
         self.tab_gotek = tk.Frame(self.content, bg=t.paper)
+        self.tab_samples = tk.Frame(self.content, bg=t.paper)  # rempli au 1er affichage
         self._build_disk_tab()
         self._build_gotek_tab()
         self._show_tab(self._tab)
@@ -949,9 +961,42 @@ class DskEditorApp:
         for j, lbl in enumerate(self._tab_labels):
             on = j == i
             lbl.config(bg=t.ink if on else t.panel, fg=t.paper if on else t.acc)
-        (self.tab_gotek if i == 0 else self.tab_disk).pack_forget()
-        (self.tab_disk if i == 0 else self.tab_gotek).pack(fill="both",
-                                                           expand=True)
+        frames = (self.tab_disk, self.tab_gotek, self.tab_samples)
+        for j, frame in enumerate(frames):
+            if j != i:
+                frame.pack_forget()
+        frames[i].pack(fill="both", expand=True)
+        if i == 2:
+            self._ensure_smp()
+
+    # ------------------------------------------------------------------ #
+    # Onglet Samples SEQ-16 (cpc_dsk.seq16.smp_gui)
+    # ------------------------------------------------------------------ #
+    def _smp_attached(self) -> bool:
+        """Vrai si l'éditeur SEQ-16 est construit dans l'onglet actuel."""
+        return (self._smp is not None
+                and getattr(self, "tab_samples", None) is not None
+                and self._smp.parent is self.tab_samples)
+
+    def _ensure_smp(self) -> None:
+        """Construit l'éditeur au premier affichage (import et polices
+        différés), ou le reconstruit dans le nouvel onglet après un
+        changement de thème / langue. La banque en cours est gardée."""
+        if self._smp_attached():
+            return
+        from cpc_dsk.seq16.smp_gui import SmpApp
+        if self._smp is None:
+            self._smp = SmpApp(self.tab_samples, host=self)
+        else:
+            self._smp.attach(self.tab_samples)
+
+    def _smp_key(self, action: str, default) -> None:
+        """Raccourci partagé : action de l'éditeur SEQ-16 si son onglet est
+        affiché, sinon celle de la disquette (ou rien)."""
+        if self._tab == 2 and self._smp_attached():
+            getattr(self._smp, action)()
+        elif default is not None:
+            default()
 
     def _blink(self, on: bool) -> None:
         try:
@@ -1226,8 +1271,9 @@ class DskEditorApp:
             self.status.config(text=self._status_text)
 
     def _fs(self):
-        """Système de fichiers du disque courant (CP/M auto-détecté)."""
-        return (CpmFilesystem(self.disk) if is_cpm_disk(self.disk)
+        """Système de fichiers du disque courant : le catalogue AMSDOS
+        (DATA ou CP/M) ; pour un format inconnu, l'ancien balayage."""
+        return (AmsdosFilesystem(self.disk) if detect_format(self.disk)
                 else CpcFilesystem(self.disk))
 
     def _refresh_files(self) -> None:
@@ -1410,7 +1456,10 @@ class DskEditorApp:
             data,
             f"{f.name}  [{f.source} {f.type_name} {f.length} {L('sz_b')}]  "
             f"load=&{f.load_addr:04X}  @&{f.offset:05X}")
-        self._file_secs = self._find_file_sectors(data)
+        if isinstance(f, AmsdosFile):
+            self._file_secs = self._fs().file_sectors(f)
+        else:
+            self._file_secs = self._find_file_sectors(data)
         self._draw_map()
         self._set_status(L("st_file", n=f.name, s=f.source,
                            k=len(self._file_secs)))
@@ -1449,7 +1498,8 @@ class DskEditorApp:
 
     def _do_add_file(self, local: str) -> None:
         dlg = AddFileDialog(self, _suggest_83(local),
-                            cpm=is_cpm_disk(self.disk))
+                            cpm=is_cpm_disk(self.disk),
+                            amsdos=detect_format(self.disk) is not None)
         self.root.wait_window(dlg.win)
         if dlg.result is None:
             return
@@ -1480,8 +1530,10 @@ class DskEditorApp:
             return
         # Nom de fichier proposé avec l'extension CPC conservée :
         # « MONPROG BAS » -> « monprog.bas », sinon « nom.bin ».
-        name = f.name.strip()
-        if " " in name:
+        name = f.name.strip().split(":")[-1]
+        if "." in name:
+            name = name.lower()
+        elif " " in name:
             base, _, ext = name.rpartition(" ")
             if ext in ("BAS", "BIN", "COM", "DOC", "SYS", "LIB", "B", "HEX",
                        "MD", "TXT"):
@@ -2013,6 +2065,9 @@ class DskEditorApp:
           ouverte),
         - autres fichiers : ajoutés à la disquette ouverte (dialogue 8.3).
         """
+        if self._tab == 2 and self._smp_attached():
+            self._smp._on_drop(paths)          # .wav / .smp pour l'éditeur SEQ-16
+            return
         disks = [p for p in paths if p.lower().endswith((".dsk", ".adf"))]
         others = [p for p in paths if p not in disks]
 

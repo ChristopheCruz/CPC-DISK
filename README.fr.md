@@ -42,6 +42,7 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - [Structure du projet](#structure-du-projet)
 - [Soutenir le projet](#soutenir-le-projet)
 - [Crédits](#crédits)
+- [Voir aussi](#voir-aussi)
 - [Licence](#licence)
 
 ## Fonctionnalités
@@ -49,9 +50,10 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 ### Onglet Disquette (`.dsk`)
 
 - **Ouvrir, créer, sauver** des images disquette au format EXTENDED CPC DSK (les `.adf` sont aussi acceptés).
-- **Catalogue des fichiers** sur les deux couches, **Filer** et **AMSDOS** : nom, type, longueur et adresse.
-- **Ajouter un fichier local** sur la disquette : nom 8.3, type (Basic ou binaire), adresse de chargement, et choix de la couche d'écriture (Filer, AMSDOS ou les deux).
-- **Extraire** un fichier vers le disque local, en conservant son extension (`MONPROG BAS` → `monprog.bas`).
+- **Catalogue AMSDOS** : le même que celui que lit le CPC (64 entrées, blocs de 1 Ko), pour les disquettes DATA (`&C1..&C9`) et SYSTEM/CP-M (`&41..&49`). Nom, type, longueur, adresse ; numéros d'utilisateur (`1:JEU.BAS`).
+- **Ajouter un fichier local** : nom 8.3, type (Basic ou binaire), adresse de chargement, **avec en-tête AMSDOS** (comme `SAVE`) ou **en données brutes** (texte, programme CP/M). L'espace est pris dans les blocs libres, comme le fait AMSDOS.
+- **Extraire** un fichier vers le disque local (`MONPROG.BAS` → `monprog.bas`), sans son en-tête.
+- Une disquette d'un format inconnu est lue « au mieux » par l'ancien balayage d'en-têtes.
 - **Supprimer** un fichier, avec confirmation.
 - **Dump hexadécimal** d'un fichier ou d'un secteur, sur trois colonnes alignées : offset, octets, ASCII.
 - **Carte des secteurs** cliquable : la géométrie est lue sur l'image, les secteurs libres (remplis de `E5` ou de `00`) sont distingués des secteurs occupés, et ceux du fichier sélectionné sont surlignés.
@@ -59,8 +61,8 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 ### Support CP/M 2.2
 
 - **Disques système CP/M 2.2 amorçables** (« System format », 40 pistes × 9 × 512, IDs de secteur `&41..&49`) : le bouton **Nouveau CP/M** (ou `cpc-dsk new x.dsk --cpm`) en génère un à partir d'une image de référence extraite d'un cpm22.dsk réel — CP/M 2.2 + Amsdos 2.0 (`AMSDOS.COM`, `DISCKIT2.COM`, `LOGO2.COM`, `LOGO2.SUB`), prêt à tester sur un Gotek réel.
-- **Détection automatique** des disques CP/M : le catalogue, l'ajout/extraction/suppression opèrent sur le répertoire CP/M (piste 2, entrées au format Filer) et les objets AMSDOS, y compris les fichiers « legacy » des disques réels dont le contenu est un objet AMSDOS inséré dans l'allocation.
-- Spécificités des disques réels gérées : noms en jeu de caractères CP/M (Planetfall), ordre des IDs de secteur séquentiel ou entrelacé (Track-Infos identiques à WinAPE sur les disques générés).
+- **Détection automatique** des disques CP/M : le catalogue est celui de CP/M 2.2 (piste 2, 64 entrées, blocs de 1 Ko). Les fichiers avec en-tête AMSDOS sont reconnus (ex. `RITDEMO.BIN`, 11 264 o).
+- Spécificités des disques réels gérées : bits d'attribut dans les noms (Planetfall), ordre des IDs de secteur séquentiel ou entrelacé (Track-Infos identiques à WinAPE sur les disques générés).
 
 ### Onglet Gotek (clé USB)
 
@@ -70,6 +72,16 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - **Vérifier** un dossier existant.
 - **Créer une image FAT16** complète de la clé (32 Mo) grâce à un rédacteur FAT intégré, sans outil externe.
 - **Charger une image `.img`** existante : liste de son contenu, renvoi des disquettes vers la pile de sources, ou extraction dans un dossier.
+
+### Onglet Samples SEQ-16
+
+Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**, le tracker chiptune 4 voix du CPC (en français, anglais et espagnol), intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`).
+
+- **WAV → banque `.SMP`** : 16 samples au plus, convertis sur les 16 niveaux de volume mesurés de l'AY-3-8912. Réglages de chaque sample : nom, fréquence (4 000 à 16 000 Hz, ou la période en NOP), bits, décimation, courbe, drive, trim, clean, tramage, découpage en N tranches égales. Une banque `.SMP` existante se rouvre (réglages de fiche seulement).
+- **Aperçu** : forme d'onde du WAV d'origine et du rendu CPC simulé, sur la même échelle de temps, et écoute des deux.
+- **Jauge de mémoire** : la banque doit tenir en 16 320 octets de données (mémoire principale du CPC, `#0040-#3FFF`) ; une banque trop grande ne peut pas être sauvée.
+- **Sauver** le `.SMP` et l'**ajouter à une disquette** : celle ouverte dans l'onglet Disquette (format DATA — elle est sauvée et son catalogue rafraîchi) ou un autre fichier `.dsk`. Le fichier reçoit un en-tête AMSDOS, comme sur le CPC.
+- En ligne de commande : `python -m cpc_dsk.seq16.wav2smp kick.wav snare.wav -o DRUMS.SMP [--dsk disque.dsk]`.
 
 ### Interface
 
@@ -105,8 +117,8 @@ L'interface dans les deux autres langues (le visuel ci-dessus est en français) 
 Python 3.8 ou plus récent suffit. `tkinter` est fourni avec Python sous Windows et macOS.
 
 ```bash
-git clone https://github.com/ChristopheCruz/AmstradCPC.git
-cd AmstradCPC
+git clone https://github.com/ChristopheCruz/CPC-DISK.git
+cd CPC-DISK
 ```
 
 Sous Linux, `tkinter` est parfois livré à part :
@@ -135,9 +147,9 @@ python -m cpc_dsk.gui
 ### Créer un disque système CP/M
 
 1. **Nouveau CP/M** (ou `cpc-dsk new cpm.dsk --cpm`) → un disque CP/M 2.2 « System format » amorçable, avec les utilitaires Amsdos. `--no-utils` produit un système nu (répertoire vide).
-2. **Ajoute** tes programmes (couche répertoire CP/M, ou objets AMSDOS seuls), puis **Sauve**.
+2. **Ajoute** tes programmes (données brutes pour un `.COM`, en-tête AMSDOS pour un binaire CPC), puis **Sauve**.
 3. Copie l'image sur la clé du Gotek (onglet Gotek, `DISK001.adf`) et amorçes-la sur un vrai CPC : le BIOS `|CPM` charge le secteur de boot, le système démarre sur `A>` et lit le répertoire de la piste 2.
-4. Les disques CP/M existants (réels ou home-brew) sont détectés automatiquement : ouvre-en un, le catalogue liste ses fichiers CP/M, fichiers « legacy » compris (ex. `RITDEMO.BIN` sur cpm22.dsk).
+4. Les disques CP/M existants (réels ou home-brew) sont détectés automatiquement : ouvre-en un, le catalogue liste ses fichiers CP/M.
 
 ```bash
 cpc-dsk list cpm.dsk --source cpm       # répertoire CP/M
@@ -162,7 +174,8 @@ cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
 | `.dsk` / `.adf` | Disquette, aucun disque ouvert | la disquette s'ouvre |
 | `.dsk` / `.adf` | Disquette, un disque ouvert | ajouté aux sources Gotek |
 | `.dsk` / `.adf` | Gotek | ajouté aux sources |
-| tout autre fichier | n'importe lequel | ajouté à la disquette ouverte |
+| tout autre fichier | Disquette / Gotek | ajouté à la disquette ouverte |
+| `.wav` / `.smp` | Samples SEQ-16 | WAV ajouté à la banque / banque ouverte |
 
 ## Raccourcis clavier
 
@@ -171,9 +184,10 @@ cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
 | <kbd>F1</kbd> / <kbd>F2</kbd> | Onglet Disquette / Gotek |
 | <kbd>F3</kbd> | Moniteur couleur / vert |
 | <kbd>F4</kbd> | Vue Fichiers / Secteurs |
-| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Ouvrir une disquette |
+| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Ouvrir une disquette (onglet Samples : ouvrir une banque `.SMP`) |
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | Nouvelle disquette |
-| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Sauver |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Sauver (onglet Samples : sauver la banque `.SMP`) |
+| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Onglet Samples : ajouter des WAV |
 | <kbd>Suppr</kbd> | Supprimer le fichier ou la source sélectionnés |
 | <kbd>Entrée</kbd> (champ secteur) | Afficher le secteur |
 
@@ -185,11 +199,17 @@ cpc_dsk/
 ├── cli.py            Interface en ligne de commande
 ├── i18n.py           Chaînes d'interface (en / fr / es)
 ├── data/
-│   └── cpm22_system.bin   Image de référence CP/M 2.2 + Amsdos 2.0 (46 880 o)
+│   └── cpm22_system.bin   CP/M 2.2 + Amsdos 2.0 : pistes système + 4 utilitaires (scripts/make_cpm_reference.py)
 ├── fonts/            Press Start 2P et VT323 (licence OFL)
+├── seq16/            Onglet Samples SEQ-16
+│   ├── wav2smp.py    Conversion WAV → .SMP (+ ligne de commande)
+│   ├── smp_model.py  Modèle de l'éditeur de banques (sans interface)
+│   ├── smp_gui.py    Éditeur de banques (onglet ou fenêtre autonome)
+│   └── dskio.py      Ajout d'une banque à une disquette DATA (par core/amsdos.py)
 └── core/
     ├── adf.py        Lecture et écriture des images disquette
-    ├── cpcfs.py      Systèmes de fichiers Filer et AMSDOS
+    ├── amsdos.py     Catalogue AMSDOS / CP/M (formats DATA et SYSTEM) : lecture, écriture, suppression
+    ├── cpcfs.py      En-têtes AMSDOS, balayage de secours (formats inconnus)
     ├── cpm.py        CP/M 2.2 (« System format ») : système de fichiers + générateur de disque
     └── gotek.py      Préparation de la clé USB et rédacteur FAT16
 ```
@@ -217,6 +237,10 @@ Une étoile ⭐ sur le dépôt, un signalement de bug ou une idée dans les *iss
 
 - **Press Start 2P** par CodeMan38 et **VT323** par Peter Hull, distribuées sous [SIL Open Font License 1.1](https://openfontlicense.org). Leurs licences sont dans `cpc_dsk/fonts/`.
 - Amstrad et CPC sont des marques de leurs détenteurs respectifs. Ce projet n'est affilié à aucun d'eux.
+
+## Voir aussi
+
+- **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)** : un tracker chiptune pour l'Amstrad CPC 6128 (séquenceur, instruments, samples et digidrums). Il utilise la bibliothèque disque de ce projet (`cpc_dsk`) pour fabriquer ses disquettes, et son éditeur de samples est l'onglet Samples SEQ-16.
 
 ## Licence
 
