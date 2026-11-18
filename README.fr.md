@@ -117,8 +117,8 @@ L'interface dans les deux autres langues (le visuel ci-dessus est en français) 
 Python 3.8 ou plus récent suffit. `tkinter` est fourni avec Python sous Windows et macOS.
 
 ```bash
-git clone https://github.com/ChristopheCruz/AmstradCPC.git
-cd AmstradCPC
+git clone https://github.com/ChristopheCruz/CPC-DISK.git
+cd CPC-DISK
 ```
 
 Sous Linux, `tkinter` est parfois livré à part :

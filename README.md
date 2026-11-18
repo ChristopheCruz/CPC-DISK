@@ -119,8 +119,8 @@ The interface in the other two languages (the banner above is French):
 Python 3.8 or newer is all you need. `tkinter` ships with Python on Windows and macOS.
 
 ```bash
-git clone https://github.com/ChristopheCruz/AmstradCPC.git
-cd AmstradCPC
+git clone https://github.com/ChristopheCruz/CPC-DISK.git
+cd CPC-DISK
 ```
 
 On Linux, `tkinter` is sometimes a separate package:
