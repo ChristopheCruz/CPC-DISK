@@ -42,6 +42,7 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - [Structure du projet](#structure-du-projet)
 - [Soutenir le projet](#soutenir-le-projet)
 - [Crédits](#crédits)
+- [Voir aussi](#voir-aussi)
 - [Licence](#licence)
 
 ## Fonctionnalités
@@ -74,7 +75,7 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 
 ### Onglet Samples SEQ-16
 
-Un éditeur de banques de samples pour le tracker SEQ-16 sur CPC, intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`).
+Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheCruz/seq-16)**, le tracker chiptune 4 voix du CPC (en français, anglais et espagnol), intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`).
 
 - **WAV → banque `.SMP`** : 16 samples au plus, convertis sur les 16 niveaux de volume mesurés de l'AY-3-8912. Réglages de chaque sample : nom, fréquence (4 000 à 16 000 Hz, ou la période en NOP), bits, décimation, courbe, drive, trim, clean, tramage, découpage en N tranches égales. Une banque `.SMP` existante se rouvre (réglages de fiche seulement).
 - **Aperçu** : forme d'onde du WAV d'origine et du rendu CPC simulé, sur la même échelle de temps, et écoute des deux.
@@ -236,6 +237,10 @@ Une étoile ⭐ sur le dépôt, un signalement de bug ou une idée dans les *iss
 
 - **Press Start 2P** par CodeMan38 et **VT323** par Peter Hull, distribuées sous [SIL Open Font License 1.1](https://openfontlicense.org). Leurs licences sont dans `cpc_dsk/fonts/`.
 - Amstrad et CPC sont des marques de leurs détenteurs respectifs. Ce projet n'est affilié à aucun d'eux.
+
+## Voir aussi
+
+- **[SEQ-16](https://github.com/ChristopheCruz/seq-16)** : un tracker chiptune pour l'Amstrad CPC 6128 (séquenceur, instruments, samples et digidrums). Il utilise la bibliothèque disque de ce projet (`cpc_dsk`) pour fabriquer ses disquettes, et son éditeur de samples est l'onglet Samples SEQ-16.
 
 ## Licence
 
