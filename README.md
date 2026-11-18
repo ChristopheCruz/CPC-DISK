@@ -77,7 +77,7 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 
 ### Samples SEQ-16 tab
 
-A sample-bank editor for **[SEQ-16](https://github.com/ChristopheCruz/seq-16)**, the 4-voice chiptune tracker for the CPC (in English, French and Spanish), built in as a third tab (also runs on its own: `python -m cpc_dsk.seq16.smp_gui`).
+A sample-bank editor for **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**, the 4-voice chiptune tracker for the CPC (in English, French and Spanish), built in as a third tab (also runs on its own: `python -m cpc_dsk.seq16.smp_gui`).
 
 - **WAV → `.SMP` bank**: up to 16 samples, converted to the AY-3-8912's 16 measured volume levels. Per-sample settings: name, frequency (4,000 to 16,000 Hz, or the period in NOP), bits, decimation, curve, drive, trim, clean, dither, slicing into N equal parts. Existing `.SMP` banks can be reopened (entry settings only).
 - **Preview**: waveform of the original WAV and of the simulated CPC rendering, on the same time scale, and playback of both.
@@ -242,7 +242,7 @@ A star ⭐ on the repository, a bug report or an idea in the *issues* helps just
 
 ## See also
 
-- **[SEQ-16](https://github.com/ChristopheCruz/seq-16)**: a chiptune tracker for the Amstrad CPC 6128 (sequencer, instruments, samples and digidrums). It uses this project's disk library (`cpc_dsk`) to build its diskettes, and its sample editor is the Samples SEQ-16 tab.
+- **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**: a chiptune tracker for the Amstrad CPC 6128 (sequencer, instruments, samples and digidrums). It uses this project's disk library (`cpc_dsk`) to build its diskettes, and its sample editor is the Samples SEQ-16 tab.
 
 ## License
 
