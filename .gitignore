@@ -50,3 +50,12 @@ docs/logo/
 
 # Fichiers du firmware HxC2001 (propriétaires : jamais dans le dépôt)
 HXC/
+
+# Disquettes commerciales (droits d'auteur) : copies personnelles pour
+# les tests, jamais dans le dépôt
+test_disks/planetfall_cpm.dsk
+test_disks/starcross_cpm.dsk
+test_disks/greed.dsk
+test_disks/sooty.dsk
+test_disks/compilation190.dsk
+test_disks/abbey.dsk
