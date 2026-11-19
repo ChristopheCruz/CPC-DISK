@@ -419,7 +419,7 @@ class BankModel:
         return wav2smp.data_size(self.build())
 
     def fits(self):
-        """Vrai si la banque tient dans la mémoire principale (16 320 octets)."""
+        """Vrai si la banque tient dans la mémoire principale (16 064 octets)."""
         return self.used_bytes() <= wav2smp.BANK_MAX_MAIN
 
     def total_seconds(self):
@@ -428,7 +428,7 @@ class BankModel:
 
     def checked_bytes(self):
         """Octets de la banque, après les contrôles : non vide, et pas plus de
-        16 320 octets de données. Sinon BankError."""
+        16 064 octets de données. Sinon BankError."""
         raw = self.build()
         size = wav2smp.data_size(raw)
         if size > wav2smp.BANK_MAX_MAIN:

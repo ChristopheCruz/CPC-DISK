@@ -85,7 +85,7 @@ A sample-bank editor for **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16
 
 - **WAV → `.SMP` bank**: up to 16 samples, converted to the AY-3-8912's 16 measured volume levels. Per-sample settings: name, frequency (4,000 to 16,000 Hz, or the period in NOP), bits, decimation, curve, drive, trim, clean, dither, slicing into N equal parts. Existing `.SMP` banks can be reopened (entry settings only).
 - **Preview**: waveform of the original WAV and of the simulated CPC rendering, on the same time scale, and playback of both.
-- **Memory gauge**: the bank must fit in 16,320 bytes of data (CPC main memory, `#0040-#3FFF`); a bank that is too big cannot be saved.
+- **Memory gauge**: the bank must fit in 16,064 bytes of data (CPC main memory, `#0040-#3EFF`); a bank that is too big cannot be saved.
 - **Save** the `.SMP` file and **add it to a diskette**: the diskette open in the Disk tab (DATA format — it is saved and its catalogue refreshed) or any other `.dsk` file. The file gets an AMSDOS header, as on the CPC.
 - Command line: `python -m cpc_dsk.seq16.wav2smp kick.wav snare.wav -o DRUMS.SMP [--dsk disk.dsk]`.
 

@@ -420,7 +420,7 @@ TR: Dict[str, Dict[str, str]] = {
                      "Del: remove the selected sample (in the list)\n"
                      "F3: colour / green monitor\n\n"
                      "A bank holds at most {m} bytes of data (CPC main "
-                     "memory, #0040-#3FFF). One second at 8,000 Hz takes "
+                     "memory, #0040-#3EFF). One second at 8,000 Hz takes "
                      "4,000 bytes."),
         "smp_quit_title": "Quit",
         "smp_quit_msg": "The bank is not saved. Quit anyway?",
@@ -818,7 +818,7 @@ TR: Dict[str, Dict[str, str]] = {
                      "Suppr : retirer le sample choisi (dans la liste)\n"
                      "F3 : moniteur couleur / vert\n\n"
                      "Une banque tient en {m} octets de données au plus (mémoire "
-                     "principale du CPC, #0040-#3FFF). Une seconde à 8 000 Hz occupe "
+                     "principale du CPC, #0040-#3EFF). Une seconde à 8 000 Hz occupe "
                      "4 000 octets."),
         "smp_quit_title": "Quitter",
         "smp_quit_msg": "La banque n'est pas sauvée. Quitter quand même ?",
@@ -1216,7 +1216,7 @@ TR: Dict[str, Dict[str, str]] = {
                      "Supr: quitar el sample elegido (en la lista)\n"
                      "F3: monitor color / verde\n\n"
                      "Un banco cabe en {m} bytes de datos como máximo "
-                     "(memoria principal del CPC, #0040-#3FFF). Un segundo a "
+                     "(memoria principal del CPC, #0040-#3EFF). Un segundo a "
                      "8.000 Hz ocupa 4.000 bytes."),
         "smp_quit_title": "Salir",
         "smp_quit_msg": "El banco no está guardado. ¿Salir de todos modos?",

@@ -92,7 +92,7 @@ ENTRY_SIZE = 16
 MAX_SAMPLES = 16
 BLOCK = 16384                      # un bloc de mémoire supplémentaire du 6128
 BANK_MAX_6128 = 65536              # 4 blocs de 16 Ko
-BANK_MAX_MAIN = 16320              # banque en mémoire principale (#0040-#3FFF),
+BANK_MAX_MAIN = 16064              # banque en mémoire principale (#0040-#3EFF),
                                    # sur tous les CPC (voir src/sample.asm de SEQ-16)
 BANK_MAX_464 = 4096                # ancienne limite prévue pour le 464
 CODE_MIN, CODE_MAX = 62, 250       # durée d'un échantillon en NOP
