@@ -47,3 +47,6 @@ Thumbs.db
 
 # Propositions de logo (dossier de travail, pas le logo final docs/logo.png)
 docs/logo/
+
+# Fichiers du firmware HxC2001 (propriétaires : jamais dans le dépôt)
+HXC/

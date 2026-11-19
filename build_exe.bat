@@ -8,6 +8,9 @@ rem  L'executable est genere dans dist\
 rem  L'onglet Samples SEQ-16 (cpc_dsk\seq16) est importe a la
 rem  demande : --hidden-import le force dans l'executable. Il n'a pas
 rem  de fichier de donnees en plus (polices = cpc_dsk\fonts).
+rem  Les fichiers HxC (firmware HxC2001, proprietaires) ne sont PAS
+rem  inclus : l'utilisateur les place dans un dossier HXC\ a cote de
+rem  l'executable.
 rem ============================================================
 
 python -m pip install --upgrade pyinstaller

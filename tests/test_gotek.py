@@ -217,7 +217,9 @@ def _make_minimal_fat32() -> bytes:
         e = c(2) + 32 * i
         img[e:e + 11] = name83
         img[e + 11] = 0x20                          # archive
-        struct.pack_into("<I", img, e + 20, first)  # départ (FAT32)
+        struct.pack_into("<H", img, e + 20, first >> 16)     # départ, fort
+        struct.pack_into("<H", img, e + 26, first & 0xFFFF)  # départ, faible
+        struct.pack_into("<H", img, e + 22, 0x6000)  # heure ≠ 0 (piège)
         struct.pack_into("<I", img, e + 28, size)
 
     entry(0, b"F1      ADF", 1024, 3)

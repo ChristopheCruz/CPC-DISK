@@ -282,7 +282,10 @@ def list_fat_image(path: str) -> List[FatFile]:
             continue
         size = struct.unpack_from("<I", ent, 28)[0]
         if fat32:
-            first = struct.unpack_from("<I", ent, 20)[0] & 0x0FFFFFFF
+            # Cluster de départ FAT32 : mot fort en 20, mot faible en 26
+            # (les octets 22-25 sont l'heure/date de modification).
+            first = ((struct.unpack_from("<H", ent, 20)[0] << 16) |
+                     struct.unpack_from("<H", ent, 26)[0]) & 0x0FFFFFFF
         else:
             first = struct.unpack_from("<H", ent, 26)[0]
         files.append(FatFile(name=name, size=size,

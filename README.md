@@ -74,6 +74,7 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 - **Verify** an existing directory.
 - **Create a full FAT16 image** of the key (32 MB) with a built-in FAT writer, no external tool needed.
 - **Load an existing `.img` image**: list its content, send its diskettes back to the source stack, or extract everything to a folder.
+- **HxC key**: prepare a USB key for a Gotek running the HxC firmware (see [HxC key](#hxc-key)).
 
 ### Samples SEQ-16 tab
 
@@ -169,6 +170,21 @@ cpc-dsk write cpm.dsk MYPGM.BIN mypgm.bin --load 0x4000
 
 ![CPC Disk Editor — Gotek tab](docs/screenshot-gotek.png)
 
+### HxC key
+
+The **HxC key** block of the Gotek tab prepares a USB key for a Gotek running the **HxC firmware** by HxC2001. That firmware reads Amstrad `.DSK` files directly (no conversion) from a FAT32 key, and shows a file selector on the CPC.
+
+The HxC files are **not distributed with CPC DISK**: the firmware belongs to HxC2001 (sold on their store). Download the official archive from <https://hxc2001.com/docs/gotek_hxc_firmware/pages/download.html> and put these files in a folder named `HXC` next to the program (next to `cpc-dsk-gui.exe`, or at the root of the project), or point to it with the **Change…** button or the `CPC_DISK_HXC` environment variable:
+
+- `AUTOBOOT.HFE` and `HXCSDFE.CFG`, from `File_Selector/Amstrad_CPC/`;
+- optionally the firmware update `.UPD`, from `Firmwares_Updates/Generic_Gotek/Standard_Firmware/`.
+
+Then:
+
+- **Prepare HxC key…** copies `AUTOBOOT.HFE`, `HXCSDFE.CFG` and the diskettes of the source list (renamed to 8.3 upper-case names, `ROBOT.DSK`…) to the root of the key. On Windows, only removable drives are accepted; if the key is not FAT32, CPC DISK offers to open the Windows Format dialog (you confirm the formatting there). Files with the same name on the key are replaced, the others are left alone.
+- **HxC FAT32 image…** builds a complete FAT32 `.img` (built-in writer, no external tool) to write onto the key with Rufus or balenaEtcher (or `dd`).
+- **Include firmware update (.UPD)** also copies the highest-version `.UPD`; to flash it, start the Gotek with both buttons pressed.
+
 ### Drag & drop (Windows)
 
 | What you drop | Active tab | Result |
@@ -213,7 +229,9 @@ cpc_dsk/
     ├── amsdos.py     AMSDOS / CP/M catalogue (DATA and SYSTEM formats): read, write, delete
     ├── cpcfs.py      AMSDOS headers, fallback scan (unknown formats)
     ├── cpm.py        CP/M 2.2 ("System format") filesystem + disk builder
-    └── gotek.py      USB key preparation and FAT16 writer
+    ├── gotek.py      USB key preparation and FAT16 writer
+    ├── fat32.py      built-in FAT32 image writer
+    └── hxc.py        HxC key (HxC firmware files + diskettes)
 ```
 
 ## Supporting the project
