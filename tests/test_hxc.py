@@ -167,6 +167,20 @@ def test_prepare_drive(tmp_path):
     assert not (key / "FF.CFG").exists()
 
 
+def test_prepare_drive_removes_old_upd_only_with_firmware(tmp_path):
+    """Procédure HxC2001 : retirer les anciens .upd avant d'en copier un."""
+    d = _fake_hxc(str(tmp_path / "h"))
+    key = tmp_path / "key"
+    key.mkdir()
+    (key / "HXCFEUSB_V3_0_0_1a.UPD").write_bytes(b"old fw")
+    (key / "old.upd").write_bytes(b"older fw")
+    hxc.prepare_hxc_drive(str(key), d, [], with_firmware=False)
+    assert (key / "old.upd").exists()          # sans firmware : on n'y touche pas
+    hxc.prepare_hxc_drive(str(key), d, [], with_firmware=True)
+    upds = sorted(p.name for p in key.iterdir() if p.suffix.lower() == ".upd")
+    assert upds == ["HXCFEUSB.UPD"]
+
+
 def test_prepare_drive_invalid_dsk_writes_nothing(tmp_path):
     d = _fake_hxc(str(tmp_path / "h"))
     key = tmp_path / "key"

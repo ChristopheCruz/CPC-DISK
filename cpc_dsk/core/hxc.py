@@ -218,6 +218,15 @@ def prepare_hxc_drive(root: str, folder: str, dsk_paths: Sequence[str],
     if not root or not os.path.isdir(root):
         raise HxcError(f"Dossier de destination introuvable : {root}")
     files = hxc_files(folder, dsk_paths, with_firmware)
+    if with_firmware:
+        # Procédure HxC2001 : « Remove any older *.upd file from the USB
+        # stick » — le bootloader prend un .upd quelconque de la racine.
+        keep = {name.upper() for name, _ in files}
+        for entry in os.listdir(root):
+            if entry.lower().endswith(".upd") and entry.upper() not in keep:
+                path = os.path.join(root, entry)
+                if os.path.isfile(path):
+                    os.remove(path)
     written: List[str] = []
     for name, data in files:
         with open(os.path.join(root, name), "wb") as fh:
