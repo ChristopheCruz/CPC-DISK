@@ -83,7 +83,7 @@ Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheC
 
 - **WAV → banque `.SMP`** : 16 samples au plus, convertis sur les 16 niveaux de volume mesurés de l'AY-3-8912. Réglages de chaque sample : nom, fréquence (4 000 à 16 000 Hz, ou la période en NOP), bits, décimation, courbe, drive, trim, clean, tramage, découpage en N tranches égales. Une banque `.SMP` existante se rouvre (réglages de fiche seulement).
 - **Aperçu** : forme d'onde du WAV d'origine et du rendu CPC simulé, sur la même échelle de temps, et écoute des deux.
-- **Jauge de mémoire** : la banque doit tenir en 16 320 octets de données (mémoire principale du CPC, `#0040-#3FFF`) ; une banque trop grande ne peut pas être sauvée.
+- **Jauge de mémoire** : la banque doit tenir en 16 064 octets de données (mémoire principale du CPC, `#0040-#3EFF`) ; une banque trop grande ne peut pas être sauvée.
 - **Sauver** le `.SMP` et l'**ajouter à une disquette** : celle ouverte dans l'onglet Disquette (format DATA — elle est sauvée et son catalogue rafraîchi) ou un autre fichier `.dsk`. Le fichier reçoit un en-tête AMSDOS, comme sur le CPC.
 - En ligne de commande : `python -m cpc_dsk.seq16.wav2smp kick.wav snare.wav -o DRUMS.SMP [--dsk disque.dsk]`.
 

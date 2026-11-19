@@ -10,7 +10,7 @@ banque .SMP à partir de fichiers WAV, sans ligne de commande :
     drive, trim, clean, tramage, découpage en tranches) ;
   - forme d'onde : le WAV d'origine et le rendu simulé du CPC ;
   - écoute du son d'origine et du rendu CPC ;
-  - jauge de mémoire (16 320 octets au plus) ;
+  - jauge de mémoire (16 064 octets au plus) ;
   - sauvegarde du .SMP et ajout à une disquette .dsk.
 
 Toute la conversion est faite par smp_model.py (sans interface), qui
@@ -1076,7 +1076,7 @@ class SmpApp:
         self.tree.item(str(i), values=vals)
 
     def _draw_gauge(self):
-        """Jauge de mémoire : octets utilisés sur 16 320 (rouge au-delà)."""
+        """Jauge de mémoire : octets utilisés sur 16 064 (rouge au-delà)."""
         try:
             c = self.gauge
             c.delete("all")
