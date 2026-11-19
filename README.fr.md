@@ -41,6 +41,7 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 - [Raccourcis clavier](#raccourcis-clavier)
 - [Structure du projet](#structure-du-projet)
 - [Soutenir le projet](#soutenir-le-projet)
+- [Remerciements](#remerciements)
 - [Crédits](#crédits)
 - [Voir aussi](#voir-aussi)
 - [Licence](#licence)
@@ -232,6 +233,28 @@ CPC Disk Editor est gratuit et le restera. S'il t'a évité quelques heures de m
 </div>
 
 Une étoile ⭐ sur le dépôt, un signalement de bug ou une idée dans les *issues* aident tout autant.
+
+## Remerciements
+
+CPC DISK repose sur le travail d'autres personnes. Merci à elles.
+
+**Outils et bibliothèques**
+- [Python](https://www.python.org/) et [tkinter](https://docs.python.org/3/library/tkinter.html) : toute l'application, sans autre dépendance.
+- [PyInstaller](https://pyinstaller.org/) : les exécutables Windows et Linux.
+- [pytest](https://docs.pytest.org/) : les tests.
+- [dosfstools](https://github.com/dosfstools/dosfstools) (`fsck.fat`, `mkfs.fat`) : la référence des rédacteurs FAT16 et FAT32 intégrés, et la vérification de leurs images dans les tests.
+- [Ayumi](https://github.com/true-grue/ayumi), l'émulateur d'AY-3-8912 de Peter Sovietov (licence MIT) : sa table de volumes du DAC sert à l'onglet SAMPLES SEQ-16 pour rendre le son du CPC.
+- Polices [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) de CodeMan38 et [VT323](https://fonts.google.com/specimen/VT323) de Peter Hull ([SIL Open Font License 1.1](https://openfontlicense.org/)).
+
+**Documentation et références**
+- [CPCWiki](https://www.cpcwiki.eu/) : le CPC, AMSDOS, CP/M et le format des images DSK.
+- [HxC2001](https://hxc2001.com/) : le firmware HxC pour Gotek, son sélecteur de fichiers ([sources](https://github.com/jfdelnero/HXCFE_file_selector)) et sa documentation.
+- [FlashFloppy](https://github.com/keirf/FlashFloppy) : l'autre firmware pour Gotek et sa documentation.
+- [La structure du système de fichiers FAT](https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system) et la documentation Microsoft de [SHFormatDrive](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shformatdrive).
+
+**Tests**
+- [WinAPE](http://www.winape.net/) : vérifier que les disquettes produites sont acceptées.
+- [Internet Archive](https://archive.org/) : les vraies disquettes CPC de `test_disks/`.
 
 ## Crédits
 
