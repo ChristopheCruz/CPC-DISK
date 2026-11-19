@@ -155,6 +155,24 @@ def _fmt_size(n: int) -> str:
     return f"{n} {L('sz_b')}"
 
 
+def _short_folder(path: str, width: int = 28) -> str:
+    """Fin d'un chemin, coupée à des séparateurs : « …\\CPC-DISK\\HXC ».
+
+    Le libellé n'a la place que d'une trentaine de caractères ; c'est la
+    fin du chemin (le dossier lui-même) qui compte."""
+    if len(path) <= width:
+        return path
+    parts = path.replace("/", os.sep).rstrip(os.sep).split(os.sep)
+    tail = parts[-1]
+    for part in reversed(parts[:-1]):
+        if len(part) + 1 + len(tail) + 2 > width:
+            break
+        tail = part + os.sep + tail
+    if len(tail) + 1 > width:
+        tail = tail[-(width - 1):]
+    return "…" + os.sep + tail if not tail.startswith(os.sep) else "…" + tail
+
+
 def _suggest_83(path: str) -> str:
     """Nom 8.3 suggéré à partir d'un nom de fichier local.
 
@@ -2059,8 +2077,7 @@ class DskEditorApp:
     def _hxc_refresh_folder(self) -> None:
         folder = self._hxc_folder()
         if folder:
-            shown = folder if len(folder) <= 46 else "…" + folder[-45:]
-            self.hxc_folder_lbl.config(text=shown, fg=self.t.hi)
+            self.hxc_folder_lbl.config(text=_short_folder(folder), fg=self.t.hi)
         else:
             self.hxc_folder_lbl.config(text=L("hxc_notfound"),
                                        fg=self.t.danger)

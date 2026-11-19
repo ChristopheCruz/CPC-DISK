@@ -176,3 +176,14 @@ def test_hxc_image(app, tmp_path):
     assert "Rufus" in info.call_args[0][1]
     assert {f.name for f in list_fat_image(out)} == {
         "AUTOBOOT.HFE", "HXCSDFE.CFG", "JEU.DSK"}
+
+
+def test_short_folder_keeps_the_end():
+    """Le libellé du dossier HxC montre la fin du chemin, pas le début."""
+    from cpc_dsk.gui import _short_folder
+    p = os.sep.join(["", "home", "moi", "Qsync", "_Travail", "_Workspace",
+                     "_Codes", "CPC-DISK", "HXC"])
+    s = _short_folder(p)
+    assert s.startswith("…") and s.endswith(os.sep.join(["CPC-DISK", "HXC"]))
+    assert len(s) <= 28
+    assert _short_folder(os.sep.join(["", "a", "HXC"])) == os.sep.join(["", "a", "HXC"])

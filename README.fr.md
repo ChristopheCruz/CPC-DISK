@@ -76,6 +76,8 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 
 ### Onglet Samples SEQ-16
 
+![CPC Disk Editor — onglet Samples SEQ-16](docs/screenshot-samples.png)
+
 Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**, le tracker chiptune 4 voix du CPC (en français, anglais et espagnol), intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`).
 
 - **WAV → banque `.SMP`** : 16 samples au plus, convertis sur les 16 niveaux de volume mesurés de l'AY-3-8912. Réglages de chaque sample : nom, fréquence (4 000 à 16 000 Hz, ou la période en NOP), bits, décimation, courbe, drive, trim, clean, tramage, découpage en N tranches égales. Une banque `.SMP` existante se rouvre (réglages de fiche seulement).
