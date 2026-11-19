@@ -92,10 +92,10 @@ TR: Dict[str, Dict[str, str]] = {
         "view_files": "Files",
         "view_map": "Sectors",
         "panel_map": "Sector map",
-        "panel_cat0": "CAT · FILER + AMSDOS",
-        "panel_cat_n": "CAT · {n} FILE{s} · FILER + AMSDOS",
+        "panel_cat0": "CAT",
+        "panel_cat_n": "CAT · {n} FILE{s}",
         "col_name": "NAME",
-        "col_layer": "LAYER",
+        "col_layer": "FORMAT",
         "col_type": "TYPE",
         "col_len": "LEN.",
         "btn_add": "Add",
@@ -208,6 +208,53 @@ TR: Dict[str, Dict[str, str]] = {
         "tag_extracted": "EXTRACTED",
         "tag_fatok": "FAT IMAGE OK",
         "tag_video": "EMPTY",
+        # HxC key (HxC2001 firmware on the Gotek)
+        "panel_hxc": "HxC key · HxC firmware",
+        "hxc_folder": "HxC files",
+        "hxc_notfound": "not found (HXC folder)",
+        "hxc_change": "Change…",
+        "hxc_fw": "Include firmware update (.UPD)",
+        "hxc_fw_hint": ("To flash it, start the Gotek with both buttons "
+                        "pressed."),
+        "btn_hxc_prepare": "Prepare HxC key…",
+        "btn_hxc_image": "HxC FAT32 image…",
+        "tag_hxcok": "COPIED",
+        "tag_hxcimg": "HXC IMAGE OK",
+        "err_hxc": "HxC key",
+        "dlg_hxc_folder": "Folder with AUTOBOOT.HFE and HXCSDFE.CFG",
+        "dlg_hxc_badfolder_title": "Not an HxC folder",
+        "dlg_hxc_badfolder_msg": ("{d} does not contain AUTOBOOT.HFE and "
+                                  "HXCSDFE.CFG."),
+        "dlg_hxc_nofolder_title": "HxC files not found",
+        "dlg_hxc_nofolder_msg": (
+            "Put AUTOBOOT.HFE and HXCSDFE.CFG (from the official HxC2001 "
+            "archive) in an HXC folder next to CPC DISK, or choose their "
+            "folder with « Change… ». The HxC firmware is not distributed "
+            "with CPC DISK."),
+        "dlg_hxc_root": "Root of the USB key",
+        "dlg_hxc_notremovable_title": "Not a USB key",
+        "dlg_hxc_notremovable_msg": ("{r} is not a removable drive: choose "
+                                     "the USB key."),
+        "dlg_hxc_notfat32_title": "Not FAT32",
+        "dlg_hxc_notfat32_msg": (
+            "{r} ({l}, {s}) is formatted {fs}. The HxC key must be FAT32.\n\n"
+            "Open the Windows Format dialog? Formatting ERASES the whole "
+            "key; you confirm it in the Windows dialog."),
+        "dlg_hxc_still_msg": "{r} is still formatted {fs}, not FAT32.",
+        "hxc_drive_desc": "Key: {l} · {fs} · {s}",
+        "dlg_hxc_confirm_title": "Write the HxC key?",
+        "dlg_hxc_confirm_msg": (
+            "{d}Files written to {r}:\n{f}\n\n"
+            "Files with the same name on the key are replaced."),
+        "hxc_no_disks": ("The source list is empty: only the HxC file "
+                         "selector is written."),
+        "st_hxc_folder": "HxC folder: {d}",
+        "st_hxc_done": "HxC key: {n} file(s) written to {r}.",
+        "dlg_hxc_img": "Save the HxC FAT32 image",
+        "dlg_hxc_img_title": "HxC image created",
+        "dlg_hxc_img_msg": (
+            "{p}\n\nWrite this image to the USB key with Rufus or "
+            "balenaEtcher (or dd on Linux / macOS). It erases the key."),
         "err_gopts": "Invalid options: {e}",
         "dlg_gsrc_title": "No sources",
         "dlg_gsrc_msg": "Add at least one diskette (.dsk/.adf) to the list.",
@@ -440,10 +487,10 @@ TR: Dict[str, Dict[str, str]] = {
         "view_files": "Fichiers",
         "view_map": "Secteurs",
         "panel_map": "Carte des secteurs",
-        "panel_cat0": "CAT · FILER + AMSDOS",
-        "panel_cat_n": "CAT · {n} FICHIER{s} · FILER + AMSDOS",
+        "panel_cat0": "CAT",
+        "panel_cat_n": "CAT · {n} FICHIER{s}",
         "col_name": "NOM",
-        "col_layer": "COUCHE",
+        "col_layer": "FORMAT",
         "col_type": "TYPE",
         "col_len": "LONG.",
         "btn_add": "Ajouter",
@@ -556,6 +603,54 @@ TR: Dict[str, Dict[str, str]] = {
         "tag_extracted": "EXTRAIT",
         "tag_fatok": "IMAGE FAT OK",
         "tag_video": "VIDE",
+        # Clé HxC (firmware HxC2001 sur le Gotek)
+        "panel_hxc": "Clé HxC · firmware HxC",
+        "hxc_folder": "Fichiers HxC",
+        "hxc_notfound": "introuvables (dossier HXC)",
+        "hxc_change": "Changer…",
+        "hxc_fw": "Inclure la mise à jour du firmware (.UPD)",
+        "hxc_fw_hint": ("Pour la flasher, démarrer le Gotek avec ses deux "
+                        "boutons enfoncés."),
+        "btn_hxc_prepare": "Préparer clé HxC…",
+        "btn_hxc_image": "Image FAT32 HxC…",
+        "tag_hxcok": "COPIÉ",
+        "tag_hxcimg": "IMAGE HXC OK",
+        "err_hxc": "Clé HxC",
+        "dlg_hxc_folder": "Dossier contenant AUTOBOOT.HFE et HXCSDFE.CFG",
+        "dlg_hxc_badfolder_title": "Pas un dossier HxC",
+        "dlg_hxc_badfolder_msg": ("{d} ne contient pas AUTOBOOT.HFE et "
+                                  "HXCSDFE.CFG."),
+        "dlg_hxc_nofolder_title": "Fichiers HxC introuvables",
+        "dlg_hxc_nofolder_msg": (
+            "Place AUTOBOOT.HFE et HXCSDFE.CFG (archive officielle "
+            "HxC2001) dans un dossier HXC à côté de CPC DISK, ou choisis "
+            "leur dossier avec « Changer… ». Le firmware HxC n'est pas "
+            "distribué avec CPC DISK."),
+        "dlg_hxc_root": "Racine de la clé USB",
+        "dlg_hxc_notremovable_title": "Pas une clé USB",
+        "dlg_hxc_notremovable_msg": ("{r} n'est pas un lecteur amovible : "
+                                     "choisis la clé USB."),
+        "dlg_hxc_notfat32_title": "Pas en FAT32",
+        "dlg_hxc_notfat32_msg": (
+            "{r} ({l}, {s}) est formatée en {fs}. La clé HxC doit être en "
+            "FAT32.\n\nOuvrir la fenêtre « Formater » de Windows ? Le "
+            "formatage EFFACE toute la clé ; tu le confirmes dans la fenêtre "
+            "de Windows."),
+        "dlg_hxc_still_msg": "{r} est toujours en {fs}, pas en FAT32.",
+        "hxc_drive_desc": "Clé : {l} · {fs} · {s}",
+        "dlg_hxc_confirm_title": "Écrire la clé HxC ?",
+        "dlg_hxc_confirm_msg": (
+            "{d}Fichiers écrits dans {r} :\n{f}\n\n"
+            "Les fichiers de même nom sur la clé sont remplacés."),
+        "hxc_no_disks": ("La liste des sources est vide : seul le "
+                         "sélecteur de fichiers HxC est écrit."),
+        "st_hxc_folder": "Dossier HxC : {d}",
+        "st_hxc_done": "Clé HxC : {n} fichier(s) écrit(s) dans {r}.",
+        "dlg_hxc_img": "Enregistrer l'image FAT32 HxC",
+        "dlg_hxc_img_title": "Image HxC créée",
+        "dlg_hxc_img_msg": (
+            "{p}\n\nÉcris cette image sur la clé USB avec Rufus ou "
+            "balenaEtcher (ou dd sous Linux / macOS). Cela efface la clé."),
         "err_gopts": "Options invalides : {e}",
         "dlg_gsrc_title": "Sources vides",
         "dlg_gsrc_msg": "Ajoutez au moins une disquette (.dsk/.adf) dans la "
@@ -791,10 +886,10 @@ TR: Dict[str, Dict[str, str]] = {
         "view_files": "Archivos",
         "view_map": "Sectores",
         "panel_map": "Mapa de sectores",
-        "panel_cat0": "CAT · FILER + AMSDOS",
-        "panel_cat_n": "CAT · {n} ARCHIVO{s} · FILER + AMSDOS",
+        "panel_cat0": "CAT",
+        "panel_cat_n": "CAT · {n} ARCHIVO{s}",
         "col_name": "NOMBRE",
-        "col_layer": "CAPA",
+        "col_layer": "FORMATO",
         "col_type": "TIPO",
         "col_len": "LEN.",
         "btn_add": "Añadir",
@@ -907,6 +1002,53 @@ TR: Dict[str, Dict[str, str]] = {
         "tag_extracted": "EXTRAÍDO",
         "tag_fatok": "IMAGEN FAT OK",
         "tag_video": "VACÍA",
+        # Llave HxC (firmware HxC2001 en el Gotek)
+        "panel_hxc": "Llave HxC · firmware HxC",
+        "hxc_folder": "Archivos HxC",
+        "hxc_notfound": "no encontrados (carpeta HXC)",
+        "hxc_change": "Cambiar…",
+        "hxc_fw": "Incluir la actualización del firmware (.UPD)",
+        "hxc_fw_hint": ("Para flashearla, arranca el Gotek con sus dos "
+                        "botones pulsados."),
+        "btn_hxc_prepare": "Preparar llave HxC…",
+        "btn_hxc_image": "Imagen FAT32 HxC…",
+        "tag_hxcok": "COPIADO",
+        "tag_hxcimg": "IMAGEN HXC OK",
+        "err_hxc": "Llave HxC",
+        "dlg_hxc_folder": "Carpeta con AUTOBOOT.HFE y HXCSDFE.CFG",
+        "dlg_hxc_badfolder_title": "No es una carpeta HxC",
+        "dlg_hxc_badfolder_msg": ("{d} no contiene AUTOBOOT.HFE y "
+                                  "HXCSDFE.CFG."),
+        "dlg_hxc_nofolder_title": "Archivos HxC no encontrados",
+        "dlg_hxc_nofolder_msg": (
+            "Pon AUTOBOOT.HFE y HXCSDFE.CFG (archivo oficial de HxC2001) en "
+            "una carpeta HXC junto a CPC DISK, o elige su carpeta con "
+            "« Cambiar… ». El firmware HxC no se distribuye con CPC DISK."),
+        "dlg_hxc_root": "Raíz de la llave USB",
+        "dlg_hxc_notremovable_title": "No es una llave USB",
+        "dlg_hxc_notremovable_msg": ("{r} no es una unidad extraíble: "
+                                     "elige la llave USB."),
+        "dlg_hxc_notfat32_title": "No es FAT32",
+        "dlg_hxc_notfat32_msg": (
+            "{r} ({l}, {s}) está formateada en {fs}. La llave HxC debe ser "
+            "FAT32.\n\n¿Abrir la ventana « Formatear » de Windows? El "
+            "formateo BORRA toda la llave; lo confirmas en la ventana de "
+            "Windows."),
+        "dlg_hxc_still_msg": "{r} sigue en {fs}, no en FAT32.",
+        "hxc_drive_desc": "Llave: {l} · {fs} · {s}",
+        "dlg_hxc_confirm_title": "¿Escribir la llave HxC?",
+        "dlg_hxc_confirm_msg": (
+            "{d}Archivos escritos en {r}:\n{f}\n\n"
+            "Los archivos con el mismo nombre en la llave se reemplazan."),
+        "hxc_no_disks": ("La lista de fuentes está vacía: solo se escribe "
+                         "el selector de archivos HxC."),
+        "st_hxc_folder": "Carpeta HxC: {d}",
+        "st_hxc_done": "Llave HxC: {n} archivo(s) escrito(s) en {r}.",
+        "dlg_hxc_img": "Guardar la imagen FAT32 HxC",
+        "dlg_hxc_img_title": "Imagen HxC creada",
+        "dlg_hxc_img_msg": (
+            "{p}\n\nEscribe esta imagen en la llave USB con Rufus o "
+            "balenaEtcher (o dd en Linux / macOS). Borra la llave."),
         "err_gopts": "Opciones inválidas: {e}",
         "dlg_gsrc_title": "Sin fuentes",
         "dlg_gsrc_msg": "Añade al menos una disquete (.dsk/.adf) a la "

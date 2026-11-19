@@ -8,7 +8,9 @@ Trois onglets (F1 / F2 / clic) :
   hexadécimale d'un fichier ou d'un secteur, carte des secteurs cliquable.
 - **Gotek (clé USB)** : préparer le répertoire à copier sur la clé USB du
   Gotek (patron de noms, sous-dossier, index de départ), le vérifier, et
-  créer une image FAT16 complète (rédacteur intégré, aucune dépendance).
+  créer une image FAT16 complète (rédacteur intégré, aucune dépendance) ;
+  bloc « Clé HxC » (firmware HxC2001 : fichiers HxC + .DSK sur une clé
+  FAT32, ou image FAT32 à flasher).
 - **Samples SEQ-16** : éditeur de banques de samples .SMP pour le tracker
   SEQ-16 (:mod:`cpc_dsk.seq16.smp_gui`), construit au premier affichage.
 
@@ -52,6 +54,19 @@ from cpc_dsk.core.gotek import (
     list_fat_image,
     prepare_usb_directory,
     verify_usb_directory,
+)
+from cpc_dsk.core.hxc import (
+    HxcError,
+    create_hxc_fat32_image,
+    drive_info,
+    drive_root,
+    dsk_names_83,
+    find_hxc_folder,
+    hxc_files,
+    hxc_payload,
+    image_size_mb,
+    open_format_dialog,
+    prepare_hxc_drive,
 )
 from cpc_dsk.i18n import LANGUAGES, detect_language, set_language as _set_lang
 from cpc_dsk.i18n import t as L
@@ -138,6 +153,24 @@ def _fmt_size(n: int) -> str:
     if n >= 1024:
         return f"{n / 1024:.1f} {L('sz_kb')}"
     return f"{n} {L('sz_b')}"
+
+
+def _short_folder(path: str, width: int = 28) -> str:
+    """Fin d'un chemin, coupée à des séparateurs : « …\\CPC-DISK\\HXC ».
+
+    Le libellé n'a la place que d'une trentaine de caractères ; c'est la
+    fin du chemin (le dossier lui-même) qui compte."""
+    if len(path) <= width:
+        return path
+    parts = path.replace("/", os.sep).rstrip(os.sep).split(os.sep)
+    tail = parts[-1]
+    for part in reversed(parts[:-1]):
+        if len(part) + 1 + len(tail) + 2 > width:
+            break
+        tail = part + os.sep + tail
+    if len(tail) + 1 > width:
+        tail = tail[-(width - 1):]
+    return "…" + os.sep + tail if not tail.startswith(os.sep) else "…" + tail
 
 
 def _suggest_83(path: str) -> str:
@@ -644,6 +677,10 @@ class DskEditorApp:
         self.gtk_outdir = tk.StringVar(value="")
         for v in (self.gtk_pattern, self.gtk_subfolder, self.gtk_index):
             v.trace_add("write", lambda *a: self._gotek_names_changed())
+        # Clé HxC : dossier choisi pendant la session (sinon détection
+        # automatique, cf. find_hxc_folder) et option « firmware .UPD ».
+        self._hxc_folder_choice: Optional[str] = None
+        self.hxc_fw = tk.BooleanVar(value=False)
 
         self._setup_fonts()
         self._apply_theme()
@@ -1589,9 +1626,14 @@ class DskEditorApp:
         tab.rowconfigure(0, weight=1)
 
         # --- sources ---
-        src = Panel(tab, self, L("panel_sources"))
-        src.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        # Colonne gauche : liste des sources (extensible) + bloc Clé HxC
+        # en bas (la colonne droite est déjà pleine aux petites tailles).
+        left = tk.Frame(tab, bg=t.paper)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        src = Panel(left, self, L("panel_sources"))
+        src.pack(fill="both", expand=True)
         self.gtk_src_panel = src
+        self._build_hxc_block(left, before=src)
         self._gotek_src_buttons = tk.Frame(src.body, bg=t.panel, padx=10,
                                            pady=10)
         self._gotek_src_buttons.pack(side="bottom", fill="x")
@@ -1749,6 +1791,67 @@ class DskEditorApp:
 
         self._gotek_refresh_tree()
         self._gotek_result_render()
+
+    def _build_hxc_block(self, master: tk.Frame, before=None) -> None:
+        """Bloc « Clé HxC » : fichiers HxC2001 + disquettes de la liste
+        Sources, copiés sur une clé FAT32 ou dans une image FAT32."""
+        t = self.t
+        hxc = Panel(master, self, L("panel_hxc"))
+        # Placé avant la liste des sources dans l'ordre de pack : c'est la
+        # liste (extensible) qui rétrécit quand la fenêtre est petite.
+        hxc.pack(side="bottom", fill="x", pady=(16, 0), before=before)
+        self.hxc_panel = hxc
+        frow = tk.Frame(hxc.body, bg=t.panel, padx=14, pady=10)
+        frow.pack(fill="x")
+        # Bouton à droite d'abord : un chemin long est tronqué, pas le bouton.
+        self.hxc_change_btn = PixelButton(frow, self, L("hxc_change"),
+                                          icon="open", padx=10,
+                                          command=self.hxc_choose_folder)
+        self.hxc_change_btn.pack(side="right")
+        self._label(frow, L("hxc_folder"), fg=t.acc).pack(side="left")
+        self.hxc_folder_lbl = self._label(frow, "", fg=t.hi, anchor="w",
+                                          width=1)
+        self.hxc_folder_lbl.pack(side="left", fill="x", expand=True,
+                                 padx=(10, 10))
+
+        crow = tk.Frame(hxc.body, bg=t.panel, padx=14)
+        crow.pack(fill="x")
+        self.hxc_fw_check = tk.Checkbutton(
+            crow, text=L("hxc_fw"), variable=self.hxc_fw, font=self.f_body,
+            bg=t.panel, fg=t.ink, activebackground=t.panel,
+            activeforeground=t.hi, selectcolor=t.paper, highlightthickness=0,
+            bd=0, anchor="w", cursor="hand2")
+        self.hxc_fw_check.pack(side="left")
+        hint = self._label(hxc.body, L("hxc_fw_hint"), fg=t.acc,
+                           font=self.f_small, anchor="w", justify="left",
+                           padx=14)
+        hint.pack(fill="x")
+        hint.bind("<Configure>", lambda e: hint.config(
+            wraplength=max(120, e.width - 30)))
+
+        arow = tk.Frame(hxc.body, bg=t.panel, padx=14)
+        arow.pack(fill="x", pady=(8, 14))
+        self.hxc_prepare_btn = PixelButton(arow, self, L("btn_hxc_prepare"),
+                                           kind="primary", padx=12,
+                                           command=self.hxc_prepare)
+        self.hxc_image_btn = PixelButton(arow, self, L("btn_hxc_image"),
+                                         padx=12, command=self.hxc_image)
+        self.hxc_prepare_btn.grid(row=0, column=0, sticky="w")
+
+        def reflow(_e=None) -> None:
+            # Deux boutons côte à côte s'il y a la place, sinon l'un sous
+            # l'autre (fenêtre étroite, libellés longs, zoom).
+            p, i = self.hxc_prepare_btn, self.hxc_image_btn
+            wide = (arow.winfo_width() - 28 >=
+                    p.winfo_reqwidth() + i.winfo_reqwidth() + 8)
+            if wide:
+                i.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=0)
+            else:
+                i.grid(row=1, column=0, sticky="w", padx=0, pady=(8, 0))
+
+        arow.bind("<Configure>", reflow)
+        reflow()
+        self._hxc_refresh_folder()
 
     # ------------------------------------------------------------------ #
     def _gotek_names(self, n: int) -> List[str]:
@@ -1963,6 +2066,149 @@ class DskEditorApp:
             return
         self._gotek_result_show([out_img], tag=L("tag_fatok"))
         self._set_status(L("st_fatimg", p=out_img))
+
+    # ------------------------------------------------------------------ #
+    # Clé HxC (firmware HxC2001 sur Gotek : lit les .DSK directement)
+    # ------------------------------------------------------------------ #
+    def _hxc_folder(self) -> Optional[str]:
+        """Dossier des fichiers HxC : choix de la session, sinon détection."""
+        return find_hxc_folder(self._hxc_folder_choice)
+
+    def _hxc_refresh_folder(self) -> None:
+        folder = self._hxc_folder()
+        if folder:
+            self.hxc_folder_lbl.config(text=_short_folder(folder), fg=self.t.hi)
+        else:
+            self.hxc_folder_lbl.config(text=L("hxc_notfound"),
+                                       fg=self.t.danger)
+
+    def hxc_choose_folder(self) -> None:
+        d = filedialog.askdirectory(title=L("dlg_hxc_folder"))
+        if not d:
+            return
+        if find_hxc_folder(d) != os.path.abspath(d):
+            self.error(L("dlg_hxc_badfolder_title"),
+                       L("dlg_hxc_badfolder_msg", d=d))
+            return
+        self._hxc_folder_choice = d
+        self._hxc_refresh_folder()
+        self._set_status(L("st_hxc_folder", d=d))
+
+    def _hxc_require_folder(self) -> Optional[str]:
+        folder = self._hxc_folder()
+        if not folder:
+            self.error(L("dlg_hxc_nofolder_title"), L("dlg_hxc_nofolder_msg"))
+        return folder
+
+    def _hxc_hwnd(self) -> int:
+        """HWND de la fenêtre principale (propriétaire de la boîte Formater)."""
+        try:
+            import ctypes
+            return ctypes.windll.user32.GetParent(self.root.winfo_id()) or 0
+        except Exception:  # noqa: BLE001 — hors Windows
+            return 0
+
+    def _hxc_plan(self, folder: str) -> Optional[List[str]]:
+        """Noms qui seront écrits (fichiers HxC + disquettes) ; affiche
+        l'erreur et renvoie None si le dossier HxC est incomplet."""
+        try:
+            payload = hxc_payload(folder, self.hxc_fw.get())
+        except (HxcError, OSError) as exc:
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error(L("err_hxc"), str(exc))
+            return None
+        names = [n for n, _ in payload]
+        return names + dsk_names_83(self._gotek_sources, names)
+
+    def _hxc_check_windows_drive(self, root: str) -> Optional[dict]:
+        """Windows : lecteur amovible et FAT32 (sinon propose la boîte
+        Formater de Windows, puis revérifie). Renvoie les infos du lecteur,
+        ``{}`` hors Windows, ou None pour abandonner."""
+        info = drive_info(root)
+        if info is None:
+            return {}
+        if not info["type_removable"]:
+            self.error(L("dlg_hxc_notremovable_title"),
+                       L("dlg_hxc_notremovable_msg", r=root))
+            return None
+        if info["fs"].upper() != "FAT32":
+            if not self.ask(L("dlg_hxc_notfat32_title"),
+                            L("dlg_hxc_notfat32_msg", r=root,
+                              fs=info["fs"] or "?",
+                              l=info["label"] or "—",
+                              s=_fmt_size(info["total"])), danger=True):
+                return None
+            try:
+                open_format_dialog(root, self._hxc_hwnd())
+            except (HxcError, OSError) as exc:
+                self.error(L("err_hxc"), str(exc))
+                return None
+            info = drive_info(root) or {}
+            if info.get("fs", "").upper() != "FAT32":
+                self.error(L("dlg_hxc_notfat32_title"),
+                           L("dlg_hxc_still_msg", r=root,
+                             fs=info.get("fs") or "?"))
+                return None
+        return info
+
+    def hxc_prepare(self) -> None:
+        """Copie fichiers HxC + disquettes à la racine d'une clé montée."""
+        folder = self._hxc_require_folder()
+        if not folder:
+            return
+        d = filedialog.askdirectory(title=L("dlg_hxc_root"))
+        if not d:
+            return
+        root = drive_root(d) if sys.platform == "win32" else d
+        info = self._hxc_check_windows_drive(root)
+        if info is None:
+            return
+        names = self._hxc_plan(folder)
+        if names is None:
+            return
+        desc = (L("hxc_drive_desc", l=info["label"] or "—", fs=info["fs"],
+                  s=_fmt_size(info["total"])) + "\n" if info else "")
+        listing = "\n".join("  " + n for n in names)
+        msg = L("dlg_hxc_confirm_msg", r=root, d=desc, f=listing)
+        if not self._gotek_sources:
+            msg += "\n\n" + L("hxc_no_disks")
+        if not self.ask(L("dlg_hxc_confirm_title"), msg):
+            return
+        try:
+            written = prepare_hxc_drive(root, folder, self._gotek_sources,
+                                        self.hxc_fw.get())
+        except (HxcError, OSError) as exc:
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error(L("err_hxc"), str(exc))
+            return
+        self._gotek_result_show(written, tag=L("tag_hxcok"))
+        self._set_status(L("st_hxc_done", n=len(written), r=root))
+
+    def hxc_image(self) -> None:
+        """Image FAT32 (.img) : fichiers HxC + disquettes de la liste."""
+        folder = self._hxc_require_folder()
+        if not folder:
+            return
+        out_img = filedialog.asksaveasfilename(
+            title=L("dlg_hxc_img"), defaultextension=".img",
+            initialfile="cpc-hxc.img", filetypes=[(L("ft_img"), "*.img")])
+        if not out_img:
+            return
+        try:
+            files = hxc_files(folder, self._gotek_sources, self.hxc_fw.get())
+            create_hxc_fat32_image(out_img, folder, self._gotek_sources,
+                                   self.hxc_fw.get(),
+                                   size_mb=image_size_mb(files))
+        except (HxcError, OSError) as exc:
+            self._gotek_result_show([str(exc)], tag="ERR", progress=0)
+            self.error(L("err_hxc"), str(exc))
+            return
+        self._gotek_result_show([out_img], tag=L("tag_hxcimg"))
+        self._set_status(L("st_fatimg", p=out_img))
+        msg = L("dlg_hxc_img_msg", p=out_img)
+        if not self._gotek_sources:
+            msg += "\n\n" + L("hxc_no_disks")
+        self.info_box(L("dlg_hxc_img_title"), msg)
 
     # ------------------------------------------------------------------ #
     # Chargement d'une image FAT16 existante (.img de clé Gotek)

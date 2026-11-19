@@ -882,10 +882,20 @@ class SmpApp:
                     command=self.open_smp).pack(side="left", padx=(8, 0))
 
         # La liste
-        cols = (("n", L("smp_col_n"), 34, "e"), ("nom", L("smp_col_name"), 78, "w"),
-                ("duree", L("smp_col_dur"), 72, "e"), ("hz", L("smp_col_hz"), 70, "e"),
-                ("nop", L("smp_col_nop"), 44, "e"), ("oct", L("smp_col_bytes"), 70, "e"),
-                ("src", L("smp_col_src"), 120, "w"))
+        # Largeurs mesurées sur le contenu le plus large de chaque colonne
+        # (et son titre) : elles suivent la police, donc le zoom et le DPI.
+        widest = {"n": "16", "nom": "MMMMMM", "duree": "10,00", "hz": "12 500",
+                  "nop": "999", "oct": "16 320", "src": "(banque .SMP)"}
+
+        def width(key, title):
+            return max(self.f_body.measure(widest[key]),
+                       self.f_small.measure(title)) + round(14 * self.scale)
+        cols = [(key, L(lbl), anchor) for key, lbl, anchor in (
+            ("n", "smp_col_n", "e"), ("nom", "smp_col_name", "w"),
+            ("duree", "smp_col_dur", "e"), ("hz", "smp_col_hz", "e"),
+            ("nop", "smp_col_nop", "e"), ("oct", "smp_col_bytes", "e"),
+            ("src", "smp_col_src", "w"))]
+        cols = [(key, title, width(key, title), anchor) for key, title, anchor in cols]
         frame = tk.Frame(body, bg=t.panel, padx=6, pady=6)
         frame.pack(side="top", fill="both", expand=True)
         self.tree = ttk.Treeview(frame, style="Smp.Treeview", show="headings",
