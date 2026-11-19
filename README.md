@@ -43,6 +43,7 @@ A "CPC screen"-looking interface, in pure Python, with no external dependencies.
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Project structure](#project-structure)
 - [Supporting the project](#supporting-the-project)
+- [Acknowledgements](#acknowledgements)
 - [Credits](#credits)
 - [See also](#see-also)
 - [License](#license)
@@ -234,6 +235,28 @@ CPC Disk Editor is free and will stay free. If it saved you a few hours of diske
 </div>
 
 A star ⭐ on the repository, a bug report or an idea in the *issues* helps just as much.
+
+## Acknowledgements
+
+CPC DISK is built on the work of others. Thank you to them.
+
+**Tools and libraries**
+- [Python](https://www.python.org/) and [tkinter](https://docs.python.org/3/library/tkinter.html): the whole application, with no other dependency.
+- [PyInstaller](https://pyinstaller.org/): the Windows and Linux executables.
+- [pytest](https://docs.pytest.org/): the tests.
+- [dosfstools](https://github.com/dosfstools/dosfstools) (`fsck.fat`, `mkfs.fat`): the reference for the built-in FAT16 and FAT32 writers, and the check of their images in the tests.
+- [Ayumi](https://github.com/true-grue/ayumi), the AY-3-8912 emulator by Peter Sovietov (MIT licence): its DAC volume table is used by the SAMPLES SEQ-16 tab to render the CPC sound.
+- Fonts [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) by CodeMan38 and [VT323](https://fonts.google.com/specimen/VT323) by Peter Hull ([SIL Open Font License 1.1](https://openfontlicense.org/)).
+
+**Documentation and references**
+- [CPCWiki](https://www.cpcwiki.eu/): the CPC, AMSDOS, CP/M and the DSK image format.
+- [HxC2001](https://hxc2001.com/): the HxC firmware for Gotek, its file selector ([sources](https://github.com/jfdelnero/HXCFE_file_selector)) and its documentation.
+- [FlashFloppy](https://github.com/keirf/FlashFloppy): the other Gotek firmware and its documentation.
+- [Design of the FAT file system](https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system) and Microsoft's [SHFormatDrive](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shformatdrive) documentation.
+
+**Testing**
+- [WinAPE](http://www.winape.net/): checking that the generated disks are accepted.
+- [Internet Archive](https://archive.org/): the real CPC disks of `test_disks/`.
 
 ## Credits
 
