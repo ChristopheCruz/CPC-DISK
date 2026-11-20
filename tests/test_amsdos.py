@@ -99,7 +99,7 @@ def test_seq16_disk():
     byname = {f.name: f for f in fs.list_files()}
     assert "SEQ16.BIN" in byname and "BRUITS.INS" in byname
     seq = byname["SEQ16.BIN"]
-    assert seq.has_header and seq.load_addr == 0x4000
+    assert seq.has_header and seq.load_addr == 0x3F00   # SEQ-16 commence en #3F00
     assert fs.read_file("USINE.INS")[:4] == b"SQ16"
     assert len(fs.read_file("USINE.INS")) == 848
 
