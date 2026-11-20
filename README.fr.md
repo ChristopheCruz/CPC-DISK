@@ -79,7 +79,7 @@ Une interface au look « écran CPC », en pur Python, sans aucune dépendance e
 
 ![CPC Disk Editor — onglet Samples SEQ-16](docs/screenshot-samples.png)
 
-Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**, le tracker chiptune 4 voix du CPC (en français, anglais et espagnol), intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`).
+Un éditeur de banques de samples pour **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)**, le tracker chiptune 4 voix du CPC (en français, anglais et espagnol), intégré en troisième onglet (il se lance aussi seul : `python -m cpc_dsk.seq16.smp_gui`). Site de SEQ-16 : [seq16.slr-ai.com](https://seq16.slr-ai.com/fr/).
 
 - **WAV → banque `.SMP`** : 16 samples au plus, convertis sur les 16 niveaux de volume mesurés de l'AY-3-8912. Réglages de chaque sample : nom, fréquence (4 000 à 16 000 Hz, ou la période en NOP), bits, décimation, courbe, drive, trim, clean, tramage, découpage en N tranches égales. Une banque `.SMP` existante se rouvre (réglages de fiche seulement).
 - **Aperçu** : forme d'onde du WAV d'origine et du rendu CPC simulé, sur la même échelle de temps, et écoute des deux.
@@ -283,7 +283,7 @@ CPC DISK repose sur le travail d'autres personnes. Merci à elles.
 
 ## Voir aussi
 
-- **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)** : un tracker chiptune pour l'Amstrad CPC 6128 (séquenceur, instruments, samples et digidrums). Il utilise la bibliothèque disque de ce projet (`cpc_dsk`) pour fabriquer ses disquettes, et son éditeur de samples est l'onglet Samples SEQ-16.
+- **[SEQ-16](https://github.com/ChristopheCruz/CPC-SEQ-16)** : un tracker chiptune pour l'Amstrad CPC 6128 (séquenceur, instruments, samples et digidrums). Il utilise la bibliothèque disque de ce projet (`cpc_dsk`) pour fabriquer ses disquettes, et son éditeur de samples est l'onglet Samples SEQ-16. Site, mode d'emploi et vidéo : [seq16.slr-ai.com](https://seq16.slr-ai.com/fr/).
 
 ## Licence
 
